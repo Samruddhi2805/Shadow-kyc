@@ -15,6 +15,14 @@ function formatCount(value: string): string {
   return Number(value).toLocaleString()
 }
 
+function formatNetworkName(net?: string): string {
+  if (!net) return '—'
+  if (net === 'undeployed') return 'Local Dev Network'
+  if (net === 'preview') return 'Preview Testnet'
+  if (net === 'preprod') return 'Preprod Testnet'
+  return net
+}
+
 // Simple client-side pseudo-hash simulation for the interactive visualizer
 async function simulateCommitment(secret: string): Promise<string> {
   if (!secret) return '00'.repeat(32)
@@ -186,7 +194,7 @@ function App() {
         </div>
         <div className="header-meta">
           <span className={`pill ${status ? 'pill-ok' : 'pill-err'}`}>
-            {status ? `● ${status.network}` : '● offline'}
+            {status ? `● ${formatNetworkName(status.network)}` : '● offline'}
           </span>
           {balance && (
             <span className="pill pill-neutral">
@@ -392,7 +400,7 @@ function Overview({
           </div>
           <div>
             <dt>Active Network</dt>
-            <dd>{status?.network ?? '—'}</dd>
+            <dd>{formatNetworkName(status?.network)}</dd>
           </div>
           <div>
             <dt>Contract Address</dt>
