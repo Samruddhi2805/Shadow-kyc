@@ -6,7 +6,7 @@
   "author": "",
   "license": "MIT",
   "scripts": {
-    "compile": "compact compile contracts/shadow-kyc.compact contracts/managed/shadow-kyc",
+    "compile": "export PATH=\"$HOME/.local/bin:$PATH\"; compact compile contracts/shadow-kyc.compact contracts/managed/shadow-kyc",
     "build": "npx tsc --noEmit || true",
     "setup": "npx tsx src/setup.ts",
     "deploy": "npx tsx src/deploy.ts",
