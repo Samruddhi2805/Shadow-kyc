@@ -24,8 +24,9 @@ import { CompiledContract } from '@midnight-ntwrk/midnight-js-protocol/compact-j
 globalThis.WebSocket = WebSocket;
 
 // Identifier under which this contract's private state is stored. The
-// hello-world contract has no witnesses, so its private state is empty ({}).
-const PRIVATE_STATE_ID = 'helloWorldPrivateState';
+// shadow-kyc contract has a localSecret witness, so its private state
+// holds the caller's secret.
+const PRIVATE_STATE_ID = 'shadowKycPrivateState';
 
 // ─── Network configuration ─────────────────────────────────────────────────────
 //
@@ -66,7 +67,7 @@ async function waitForProofServer(maxAttempts = 60, delayMs = 2000): Promise<boo
 // ─── Compiled contract loading ─────────────────────────────────────────────────
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const zkConfigPath = path.resolve(__dirname, '..', 'contracts', 'managed', 'hello-world');
+const zkConfigPath = path.resolve(__dirname, '..', 'contracts', 'managed', 'shadow-kyc');
 const contractPath = path.join(zkConfigPath, 'contract', 'index.js');
 
 if (!fs.existsSync(contractPath)) {
@@ -74,9 +75,9 @@ if (!fs.existsSync(contractPath)) {
   process.exit(1);
 }
 
-const HelloWorld = await import(pathToFileURL(contractPath).href);
+const ShadowKyc = await import(pathToFileURL(contractPath).href);
 
-const compiledContract = CompiledContract.make('hello-world', HelloWorld.Contract).pipe(
+const compiledContract = CompiledContract.make('shadow-kyc', ShadowKyc.Contract).pipe(
   CompiledContract.withVacantWitnesses,
   CompiledContract.withCompiledFileAssets(zkConfigPath),
 );
@@ -112,7 +113,7 @@ async function createProviders(walletCtx: WalletContext) {
 
   return {
     privateStateProvider: levelPrivateStateProvider({
-      privateStateStoreName: 'hello-world-state',
+      privateStateStoreName: 'shadow-kyc-state',
       accountId,
       privateStoragePasswordProvider: () => privateStatePassword,
     }),
@@ -284,14 +285,11 @@ async function main() {
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       // Midnight.js 4.1.x supplies private state via privateStateId +
-      // initialPrivateState (empty here — the hello-world contract has no
-      // witnesses). args is the contract constructor's arguments: empty for
-      // hello-world's no-arg constructor. (Statically-typed contracts can omit
-      // args entirely; this script loads the contract dynamically, so the
-      // conditional args type widens to any[] and an explicit [] is required.)
+      // initialPrivateState. The shadow-kyc contract's constructor takes a
+      // single `name` argument (the authority's public name).
       deployed = await deployContract(providers, {
         compiledContract: compiledContract as any,
-        args: [],
+        args: ['Shadow-KYC Authority'],
         privateStateId: PRIVATE_STATE_ID,
         initialPrivateState: {},
       });

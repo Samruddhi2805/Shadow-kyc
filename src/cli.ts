@@ -24,14 +24,14 @@ import { CompiledContract } from '@midnight-ntwrk/midnight-js-protocol/compact-j
 globalThis.WebSocket = WebSocket;
 
 // Must match the privateStateId used at deploy time so the CLI reconnects to
-// the same private state. The hello-world contract has no witnesses (empty state).
-const PRIVATE_STATE_ID = 'helloWorldPrivateState';
+// the same private state. The shadow-kyc contract has a localSecret witness.
+const PRIVATE_STATE_ID = 'shadowKycPrivateState';
 
 const { network, config: networkConfig } = resolveNetwork();
 const SEED = getOrCreateSeed(network);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const zkConfigPath = path.resolve(__dirname, '..', 'contracts', 'managed', 'hello-world');
+const zkConfigPath = path.resolve(__dirname, '..', 'contracts', 'managed', 'shadow-kyc');
 
 // Load compiled contract
 const contractPath = path.join(zkConfigPath, 'contract', 'index.js');
@@ -42,9 +42,9 @@ if (!fs.existsSync(contractPath)) {
   process.exit(1);
 }
 
-const HelloWorld = await import(pathToFileURL(contractPath).href);
+const ShadowKyc = await import(pathToFileURL(contractPath).href);
 
-const compiledContract = CompiledContract.make('hello-world', HelloWorld.Contract).pipe(
+const compiledContract = CompiledContract.make('shadow-kyc', ShadowKyc.Contract).pipe(
   CompiledContract.withVacantWitnesses,
   CompiledContract.withCompiledFileAssets(zkConfigPath),
 );
@@ -80,7 +80,7 @@ async function createProviders(walletCtx: WalletContext) {
 
   return {
     privateStateProvider: levelPrivateStateProvider({
-      privateStateStoreName: 'hello-world-state',
+      privateStateStoreName: 'shadow-kyc-state',
       accountId,
       privateStoragePasswordProvider: () => privateStatePassword,
     }),
@@ -165,20 +165,23 @@ async function main() {
     let running = true;
     while (running) {
       console.log('─── Menu ───────────────────────────────────────────────────────');
-      console.log('  1. Store a message');
-      console.log('  2. Read current message');
-      console.log('  3. Check wallet balance');
-      console.log('  4. Exit\n');
+      console.log('  1. Issue credential (request KYC/AML)');
+      console.log('  2. Approve credential (authority)');
+      console.log('  3. Prove eligibility (ZK proof, private)');
+      console.log('  4. Revoke credential (authority)');
+      console.log('  5. Read contract state');
+      console.log('  6. Check wallet balance');
+      console.log('  7. Exit\n');
 
       const choice = await rl.question('  Your choice: ');
 
       switch (choice.trim()) {
         case '1': {
-          const message = await rl.question('  Enter your message: ');
-          console.log('\n  Submitting transaction (this may take 30-60 seconds)...');
+          console.log('\n  Submitting credential request (this may take 30-60 seconds)...');
+          console.log('  🔒 Your identity is hashed into a commitment — never revealed.');
           try {
-            const tx = await deployed.callTx.storeMessage(message);
-            console.log(`\n  ✅ Message stored: "${message}"`);
+            const tx = await deployed.callTx.issueCredential();
+            console.log(`\n  ✅ Credential request submitted!`);
             console.log(`  Transaction ID: ${tx.public.txId}`);
             console.log(`  Block height: ${tx.public.blockHeight}\n`);
           } catch (error) {
@@ -188,16 +191,14 @@ async function main() {
         }
 
         case '2': {
-          console.log('\n  Reading message from blockchain...');
+          const commitment = await rl.question('  Enter credential commitment (hex): ');
+          console.log('\n  Submitting approval (this may take 30-60 seconds)...');
           try {
-            const contractState = await providers.publicDataProvider.queryContractState(deployment.address);
-            if (contractState) {
-              const ledgerState = HelloWorld.ledger(contractState.data);
-              const message = Buffer.from(ledgerState.message).toString();
-              console.log(`\n  📋 Current message: "${message}"\n`);
-            } else {
-              console.log('\n  📋 No message found (contract state empty)\n');
-            }
+            const commitmentBytes = Buffer.from(commitment, 'hex');
+            const tx = await deployed.callTx.approveCredential(commitmentBytes);
+            console.log(`\n  ✅ Credential approved!`);
+            console.log(`  Transaction ID: ${tx.public.txId}`);
+            console.log(`  Block height: ${tx.public.blockHeight}\n`);
           } catch (error) {
             console.error('\n  ❌ Failed:', error instanceof Error ? error.message : error);
           }
@@ -205,6 +206,58 @@ async function main() {
         }
 
         case '3': {
+          const commitment = await rl.question('  Enter your credential commitment (hex): ');
+          console.log('\n  Generating ZK proof (this may take 30-60 seconds)...');
+          console.log('  🔒 Proved without revealing your input — your identity stays private.');
+          try {
+            const commitmentBytes = Buffer.from(commitment, 'hex');
+            const tx = await deployed.callTx.proveEligibility(commitmentBytes);
+            console.log(`\n  ✅ Eligibility proven!`);
+            console.log(`  Transaction ID: ${tx.public.txId}`);
+            console.log(`  Block height: ${tx.public.blockHeight}\n`);
+          } catch (error) {
+            console.error('\n  ❌ Failed:', error instanceof Error ? error.message : error);
+          }
+          break;
+        }
+
+        case '4': {
+          const commitment = await rl.question('  Enter credential commitment to revoke (hex): ');
+          console.log('\n  Submitting revocation (this may take 30-60 seconds)...');
+          try {
+            const commitmentBytes = Buffer.from(commitment, 'hex');
+            const tx = await deployed.callTx.revokeCredential(commitmentBytes);
+            console.log(`\n  ✅ Credential revoked!`);
+            console.log(`  Transaction ID: ${tx.public.txId}`);
+            console.log(`  Block height: ${tx.public.blockHeight}\n`);
+          } catch (error) {
+            console.error('\n  ❌ Failed:', error instanceof Error ? error.message : error);
+          }
+          break;
+        }
+
+        case '5': {
+          console.log('\n  Reading contract state from blockchain...');
+          try {
+            const contractState = await providers.publicDataProvider.queryContractState(deployment.address);
+            if (contractState) {
+              const ledgerState = ShadowKyc.ledger(contractState.data);
+              const authorityName = Buffer.from(ledgerState.authorityName).toString();
+              console.log(`\n  📋 Authority: ${authorityName}`);
+              console.log(`  📋 Pending credentials: ${ledgerState.pendingCredentials.size()}`);
+              console.log(`  📋 Approved credentials: ${ledgerState.credentials.size()}`);
+              console.log(`  📋 Revoked credentials: ${ledgerState.revokedCredentials.size()}`);
+              console.log(`  📋 Eligibility proofs: ${ledgerState.eligibilityCount}\n`);
+            } else {
+              console.log('\n  📋 No contract state found\n');
+            }
+          } catch (error) {
+            console.error('\n  ❌ Failed:', error instanceof Error ? error.message : error);
+          }
+          break;
+        }
+
+        case '6': {
           console.log('\n  Checking balance...');
           const currentState = await walletCtx.wallet.waitForSyncedState();
           const currentBalance = currentState.unshielded.balances[unshieldedToken().raw] ?? 0n;
@@ -214,13 +267,13 @@ async function main() {
           break;
         }
 
-        case '4':
+        case '7':
           running = false;
           console.log('\n  👋 Goodbye!\n');
           break;
 
         default:
-          console.log('\n  ❌ Invalid choice. Please enter 1-4.\n');
+          console.log('\n  ❌ Invalid choice. Please enter 1-7.\n');
       }
     }
 

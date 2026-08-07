@@ -1,0 +1,107 @@
+pragma language_version >= 0.23;
+
+import CompactStandardLibrary;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Shadow-KYC / ZK-AML — privacy-preserving compliance system
+//
+// PUBLIC (on-chain, visible to every observer):
+//   - authority:           the KYC/AML authority's dapp-specific public key
+//   - authorityName:       the authority's public name (deliberately disclosed)
+//   - pendingCredentials:  set of credential commitments awaiting approval
+//   - credentials:         set of approved credential commitments
+//   - revokedCredentials:  set of revoked credential commitments
+//   - eligibilityCount:    public counter of eligibility proofs performed
+//
+// PRIVATE (witness, proved but NEVER revealed):
+//   - localSecret():       the caller's secret — the user's identity. A user's
+//                          credential is a commitment (hash) of this secret.
+//                          The secret itself never appears on-chain, in events,
+//                          or in any output.
+//
+// PRIVACY STORY:
+//   - An on-chain observer CAN see: a credential exists, was approved by the
+//     authority, is valid/not revoked, and that *someone* proved eligibility.
+//   - An on-chain observer CANNOT see: WHO holds a credential, what documents
+//     were submitted, or which user maps to which credential commitment.
+//   - proveEligibility proves knowledge of the secret behind a credential
+//     WITHOUT revealing the secret — "proved without revealing your input".
+// ═══════════════════════════════════════════════════════════════════════════
+
+export sealed ledger authority: Bytes<32>;
+export sealed ledger authorityName: Opaque<"string">;
+export ledger pendingCredentials: Set<Bytes<32>>;
+export ledger credentials: Set<Bytes<32>>;
+export ledger revokedCredentials: Set<Bytes<32>>;
+export ledger eligibilityCount: Uint<64>;
+
+witness localSecret(): Bytes<32>;
+
+constructor (name: Opaque<"string">) {
+    const _secret = localSecret();
+    const pubKey = getDappPublicKey(_secret);
+    // The authority's identity is deliberately PUBLIC so users can verify
+    // they are interacting with the trusted KYC/AML authority.
+    authority = disclose(pubKey);
+    authorityName = disclose(name);
+    eligibilityCount = 0;
+}
+
+// Called by a user to request a KYC/AML credential.
+// The user's identity (localSecret) is hashed into a commitment that is
+// stored on-chain. The secret itself is NEVER revealed.
+export circuit issueCredential(): [] {
+    const _secret = localSecret();
+    const commitment = persistentHash<Bytes<32>>(_secret);
+    // The commitment (hash of the secret) is deliberately PUBLIC — it is the
+    // on-chain representation of the credential. The secret itself is never
+    // revealed; only its hash is disclosed.
+    assert(!pendingCredentials.member(disclose(commitment)), "Credential request already pending");
+    assert(!credentials.member(disclose(commitment)), "Credential already issued");
+    pendingCredentials.insert(disclose(commitment));
+}
+
+// Called by the authority to approve a pending credential request.
+// The authority authenticates with its own secret. The credential commitment
+// is deliberately disclosed as approved — but the user's identity behind it
+// remains private.
+export circuit approveCredential(credentialCommitment: Bytes<32>): [] {
+    const _secret = localSecret();
+    const pubKey = getDappPublicKey(_secret);
+    assert(authority == pubKey, "Only the authority can approve credentials");
+    assert(pendingCredentials.member(disclose(credentialCommitment)), "No pending credential with this commitment");
+    pendingCredentials.remove(disclose(credentialCommitment));
+    credentials.insert(disclose(credentialCommitment));
+}
+
+// Called by a user to prove they hold a valid, non-revoked KYC/AML credential
+// and are eligible for a regulated transaction — WITHOUT revealing their
+// identity or the credential secret.
+export circuit proveEligibility(credentialCommitment: Bytes<32>): [] {
+    const _secret = localSecret();
+    // Prove knowledge of the secret behind this credential commitment.
+    // The secret is a private witness — it is proved but never revealed.
+    // The credentialCommitment is already public (it was disclosed when
+    // approved), so using disclose() here is semantically correct.
+    assert(persistentHash<Bytes<32>>(_secret) == credentialCommitment,
+           "You do not hold this credential");
+    assert(credentials.member(disclose(credentialCommitment)), "Credential not approved");
+    assert(!revokedCredentials.member(disclose(credentialCommitment)), "Credential revoked");
+    eligibilityCount = (eligibilityCount + 1) as Uint<64>;
+}
+
+// Called by the authority to revoke a credential.
+export circuit revokeCredential(credentialCommitment: Bytes<32>): [] {
+    const _secret = localSecret();
+    const pubKey = getDappPublicKey(_secret);
+    assert(authority == pubKey, "Only the authority can revoke credentials");
+    assert(credentials.member(disclose(credentialCommitment)), "Credential not approved");
+    credentials.remove(disclose(credentialCommitment));
+    revokedCredentials.insert(disclose(credentialCommitment));
+}
+
+// Hash a public key specific to this DApp so the authority cannot be tracked
+// across different DApps.
+circuit getDappPublicKey(_secret: Bytes<32>): Bytes<32> {
+    return persistentHash<Vector<2, Bytes<32>>>([pad(32, "shadow-kyc:pk:"), _secret]);
+}
