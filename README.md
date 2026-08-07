@@ -153,16 +153,84 @@ generated state.
 | `npm run test:e2e`      | Smoke + read-back check against the deployed contract.         |
 | `npm run clean`         | Remove `contracts/managed/`, `.midnight-state.json`, and `.midnight-wallet-state/`. |
 | `npm run proof-server:start` / `:stop` | Compose lifecycle for just the proof-server service. |
+| `npm run api`           | Start the API + frontend server (port 8080).                   |
+| `npm run frontend:dev`  | Vite dev server (port 5173) with `/api` proxied to 8080.       |
+| `npm run frontend:build`| Build the React frontend into `frontend/dist/`.                |
+
+## Frontend (Phase 3)
+
+The project ships a React + TypeScript frontend (in `frontend/`) that talks to
+the deployed contract through a small API server (`src/api-server.ts`). The
+API server reuses the same wallet/contract infrastructure as the CLI, so it
+needs at least one deployment on the active network.
+
+### Starting the web app
+
+```bash
+# 1. (once) Deploy the contract and start the local devnet
+npm run setup
+
+# 2. Start the API server — connects to the deployed contract
+npm run api
+
+# 3. In a second terminal — dev mode with HMR (or open http://localhost:8080
+#    directly if you've built the frontend with `npm run frontend:build`)
+npm run frontend:dev
+```
+
+Open `http://localhost:5173` for the Vite dev server, or
+`http://localhost:8080` once the frontend is built.
+
+### What the UI does
+
+- **Overview** — live contract state: authority name, network, contract
+  address, eligibility-proof counter, and a credential registry (pending /
+  approved / revoked).
+- **User Actions** — request a KYC/AML credential (`issueCredential`) and
+  prove eligibility with a zero-knowledge proof (`proveEligibility`). The
+  user's identity is hashed into a commitment and never leaves their side.
+- **Authority** — approve pending credentials (`approveCredential`) and
+  revoke credentials (`revokeCredential`).
+
+> ⚠️ **Local devnet only.** The API server uses the same genesis seed as the
+> deploy script, so on the bundled devnet it acts as both user and authority.
+> Do not expose the API server to a public network without replacing the seed
+> and adding authentication.
+
+### API endpoints
+
+| Method | Path            | Description                                        |
+| ------ | --------------- | -------------------------------------------------- |
+| GET    | `/api/status`   | Server, network, contract address, authority key.  |
+| GET    | `/api/state`    | Full public ledger state (credential sets, count). |
+| GET    | `/api/balance`  | Wallet tNight / DUST balances.                     |
+| POST   | `/api/issue`    | Call `issueCredential` (user action).              |
+| POST   | `/api/approve`  | Call `approveCredential` (authority, body: `{commitment}`). |
+| POST   | `/api/prove`    | Call `proveEligibility` (user, ZK proof, body: `{commitment}`). |
+| POST   | `/api/revoke`   | Call `revokeCredential` (authority, body: `{commitment}`). |
+
+Transactions take 30–60s each (proof generation + block time). The UI shows
+a "busy" state and polls the ledger until the transaction lands.
 
 ## Project structure
 
 ```
 risein/
 ├── contracts/
-│   └── hello-world.compact     # Compact source
+│   ├── shadow-kyc.compact      # Compact source (Phase 1)
+│   └── managed/                # compiled output (gitignored)
+├── frontend/
+│   ├── src/                    # React + TypeScript frontend (Phase 3)
+│   │   ├── App.tsx             # main UI (overview / user / authority tabs)
+│   │   ├── api.ts              # typed API client
+│   │   ├── types.ts            # shared response types
+│   │   └── ...
+│   ├── vite.config.ts          # dev-server proxy for /api
+│   └── package.json
 ├── scripts/
 │   └── e2e-check.ts            # smoke + read-back
 ├── src/
+│   ├── api-server.ts           # REST API + static frontend host (Phase 3)
 │   ├── network.ts              # network selection + state file management
 │   ├── wallet.ts               # wallet construction + sync-state cache
 │   ├── setup.ts                # orchestrator for `npm run setup`

@@ -16,6 +16,8 @@
     "proof-server:start": "docker compose up -d",
     "proof-server:stop": "docker compose down",
     "clean": "rm -rf contracts/managed .midnight-state.json .midnight-wallet-state",
+    "api": "npx tsx src/api-server.ts",
+    "api:start": "npx tsx src/api-server.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "tsx scripts/e2e-check.ts",

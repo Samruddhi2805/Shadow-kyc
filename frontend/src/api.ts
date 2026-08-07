@@ -1,0 +1,72 @@
+/**
+ * Thin typed client for the Shadow-KYC API server.
+ *
+ * In dev, Vite proxies /api to the API server (see vite.config.ts). In
+ * production, the API server serves the built frontend from the same origin,
+ * so relative /api paths work in both cases.
+ */
+import type {
+  ApiError,
+  AuditHistoryResponse,
+  BalanceInfo,
+  ContractState,
+  ServerStatus,
+  TxResponse,
+} from './types';
+
+const BASE = '/api';
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    headers: { 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(3000),
+    ...init,
+  });
+
+  let body: unknown = null;
+  try {
+    body = await res.json();
+  } catch {
+    // Non-JSON response (e.g. HTML error page).
+  }
+
+  if (!res.ok) {
+    const message =
+      (body as ApiError | null)?.error ??
+      `Request failed with status ${res.status}`;
+    throw new Error(message);
+  }
+
+  return body as T;
+}
+
+export const api = {
+  getStatus: () => request<ServerStatus>('/status'),
+
+  getState: () => request<ContractState>('/state'),
+
+  getBalance: () => request<BalanceInfo>('/balance'),
+
+  getHistory: () => request<AuditHistoryResponse>('/history'),
+
+  issueCredential: () =>
+    request<TxResponse>('/issue', { method: 'POST', body: '{}' }),
+
+  approveCredential: (commitment: string) =>
+    request<TxResponse>('/approve', {
+      method: 'POST',
+      body: JSON.stringify({ commitment }),
+    }),
+
+  proveEligibility: (commitment: string) =>
+    request<TxResponse>('/prove', {
+      method: 'POST',
+      body: JSON.stringify({ commitment }),
+    }),
+
+  revokeCredential: (commitment: string) =>
+    request<TxResponse>('/revoke', {
+      method: 'POST',
+      body: JSON.stringify({ commitment }),
+    }),
+};
