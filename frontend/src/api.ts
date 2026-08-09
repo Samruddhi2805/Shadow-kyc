@@ -49,8 +49,11 @@ export const api = {
 
   getHistory: () => request<AuditHistoryResponse>('/history'),
 
-  issueCredential: () =>
-    request<TxResponse>('/issue', { method: 'POST', body: '{}' }),
+  issueCredential: (commitment?: string) =>
+    request<TxResponse>('/issue', {
+      method: 'POST',
+      body: JSON.stringify(commitment ? { commitment } : {}),
+    }),
 
   approveCredential: (commitment: string) =>
     request<TxResponse>('/approve', {

@@ -8,6 +8,17 @@ import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
+try {
+  if (typeof process !== 'undefined' && typeof (process as any).loadEnvFile === 'function') {
+    const envPath = path.resolve(process.cwd(), '.env');
+    if (fs.existsSync(envPath)) {
+      (process as any).loadEnvFile(envPath);
+    }
+  }
+} catch {
+  // Ignore error if env loading fails
+}
+
 export type NetworkId = 'undeployed' | 'preview' | 'preprod';
 
 export const NETWORK_IDS: readonly NetworkId[] = ['undeployed', 'preview', 'preprod'] as const;
@@ -232,8 +243,25 @@ export function getOrCreateSeed(network: NetworkId, opts: SeedOptions = {}): str
 }
 
 export function getDeployment(network: NetworkId, opts: FsOptions = {}): DeploymentRecord | null {
+  const env = opts.env ?? process.env;
+  const envAddress = env.CONTRACT_ADDRESS || env.VITE_CONTRACT_ADDRESS;
   const state = loadState(opts);
-  return state?.deployments?.[network] ?? null;
+  const record = state?.deployments?.[network] ?? null;
+
+  if (record) {
+    if (envAddress) {
+      return { ...record, address: envAddress };
+    }
+    return record;
+  }
+  if (envAddress) {
+    return {
+      address: envAddress,
+      deployer: env.DEPLOYER_ADDRESS ?? '',
+      deployedAt: new Date().toISOString(),
+    };
+  }
+  return null;
 }
 
 export function recordDeployment(

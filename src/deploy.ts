@@ -75,10 +75,17 @@ if (!fs.existsSync(contractPath)) {
   process.exit(1);
 }
 
+import { Buffer } from 'buffer';
+
 const ShadowKyc = await import(pathToFileURL(contractPath).href);
 
 const compiledContract = CompiledContract.make('shadow-kyc', ShadowKyc.Contract).pipe(
-  CompiledContract.withVacantWitnesses,
+  CompiledContract.withWitnesses({
+    localSecret: () => {
+      const secret = new Uint8Array(Buffer.from(SEED, 'hex'));
+      return [secret, secret];
+    },
+  }),
   CompiledContract.withCompiledFileAssets(zkConfigPath),
 );
 

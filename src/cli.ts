@@ -18,6 +18,7 @@ import { NodeZkConfigProvider } from '@midnight-ntwrk/midnight-js-node-zk-config
 import { resolveNetwork, getOrCreateSeed, getDeployment } from './network';
 import { createWallet, persistWalletState, unshieldedToken, type WalletContext } from './wallet';
 import { CompiledContract } from '@midnight-ntwrk/midnight-js-protocol/compact-js';
+import { StateValue } from '@midnight-ntwrk/compact-runtime';
 
 // Enable WebSocket for GraphQL subscriptions
 // @ts-expect-error Required for wallet sync
@@ -45,7 +46,12 @@ if (!fs.existsSync(contractPath)) {
 const ShadowKyc = await import(pathToFileURL(contractPath).href);
 
 const compiledContract = CompiledContract.make('shadow-kyc', ShadowKyc.Contract).pipe(
-  CompiledContract.withVacantWitnesses,
+  CompiledContract.withWitnesses({
+    localSecret: () => {
+      const secret = new Uint8Array(Buffer.from(SEED, 'hex'));
+      return [secret, secret];
+    },
+  }),
   CompiledContract.withCompiledFileAssets(zkConfigPath),
 );
 
@@ -156,7 +162,7 @@ async function main() {
       compiledContract: compiledContract as any,
       contractAddress: deployment.address,
       privateStateId: PRIVATE_STATE_ID,
-      initialPrivateState: {},
+      initialPrivateState: StateValue.newNull(),
     });
 
     console.log('  ✅ Connected!\n');

@@ -10,6 +10,7 @@ const API_TARGET = process.env.API_URL ?? 'http://127.0.0.1:8080'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  envDir: '..',
   server: {
     proxy: {
       '/api': {

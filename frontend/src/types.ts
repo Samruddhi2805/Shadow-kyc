@@ -71,3 +71,25 @@ export interface AuditRecord {
 export interface AuditHistoryResponse {
   history: AuditRecord[];
 }
+
+export interface ConnectedWalletInfo {
+  id: string;
+  name: string;
+  address: string;
+  tNight: string;
+  dust?: string;
+  network?: string;
+  isWebWallet?: boolean;
+}
+
+export interface TxModalProgressState {
+  open: boolean;
+  action: 'issueCredential' | 'approveCredential' | 'proveEligibility' | 'revokeCredential';
+  step: 'witness' | 'proving' | 'signing' | 'confirming' | 'done' | 'error';
+  title: string;
+  commitment?: string;
+  txId?: string;
+  blockHeight?: number;
+  message?: string;
+  error?: string;
+}
