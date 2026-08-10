@@ -245,19 +245,26 @@ An on-chain observer **CANNOT** see: WHO the user is, what their secret is, or w
 
 ## 📸 Level 1 Evidence
 
-### Successful Compact Compilation
+### 1. Successful Compact Compilation
 
-> 📌 **Insert screenshot here** showing the terminal output of `npm run compile` with all 4 circuits successfully compiled:
-> - `approveCredential` (k=13, rows=4459)
-> - `issueCredential` (k=13, rows=2281)
-> - `proveEligibility` (k=13, rows=2631)
-> - `revokeCredential` (k=13, rows=4459)
+The Shadow-KYC Compact contract successfully compiles into four circuits:
 
-### Preview Contract Deployment
+- `approveCredential`
+- `issueCredential`
+- `proveEligibility`
+- `revokeCredential`
 
-> 📌 **Insert screenshot here** showing the terminal output of `npm run deploy -- --network preview` with:
-> - Successful deployment confirmation
-> - Contract address: `3508cc15dd43ad50f9af84d722fd71aba6b9a45eea6731656e539c195499bbcb`
+![Level 1 — Successful Compact Compilation](docs/screenshots/level1-compile.png)
+
+### 2. Preview Contract Deployment
+
+Shadow-KYC is successfully deployed to the Midnight Preview Testnet.
+
+**Contract Address:**
+
+`3508cc15dd43ad50f9af84d722fd71aba6b9a45eea6731656e539c195499bbcb`
+
+![Level 1 — Preview Contract Deployment](docs/screenshots/level1-deployment.png)
 
 ---
 
