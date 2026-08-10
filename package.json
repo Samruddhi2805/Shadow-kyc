@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "description": "Shadow-KYC / ZK-AML — privacy-preserving compliance system on Midnight Network",
-  "author": "",
+  "author": "Samruddhi Nevse",
   "license": "MIT",
   "scripts": {
     "compile": "export PATH=\"$HOME/.local/bin:$PATH\"; compact compile contracts/shadow-kyc.compact contracts/managed/shadow-kyc",
@@ -17,6 +17,8 @@
     "proof-server:stop": "docker compose down",
     "clean": "rm -rf contracts/managed .midnight-state.json .midnight-wallet-state",
     "api": "npx tsx src/api-server.ts",
+    "api:kill": "bash -c 'lsof -ti :8080 | xargs kill -9 2>/dev/null; echo Port 8080 freed'",
+    "api:fresh": "bash -c 'lsof -ti :8080 | xargs kill -9 2>/dev/null; sleep 0.5; npx tsx src/api-server.ts'",
     "api:start": "npx tsx src/api-server.ts",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -48,6 +50,9 @@
   },
   "engines": {
     "node": ">=22.0.0"
+  },
+  "overrides": {
+    "@midnight-ntwrk/onchain-runtime-v3": "3.0.0"
   },
   "keywords": ["midnight", "blockchain", "zero-knowledge", "privacy", "kyc", "aml"]
 }

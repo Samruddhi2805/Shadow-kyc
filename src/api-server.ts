@@ -58,9 +58,9 @@ const SEED = getOrCreateSeed(network);
 
 const compiledContract = CompiledContract.make('shadow-kyc', ShadowKyc.Contract).pipe(
   CompiledContract.withWitnesses({
-    localSecret: () => {
+    localSecret: (context: any) => {
       const secret = new Uint8Array(Buffer.from(SEED, 'hex'));
-      return [secret, secret];
+      return [context.privateState, secret];
     },
   }),
   CompiledContract.withCompiledFileAssets(zkConfigPath),
@@ -105,12 +105,20 @@ async function createProviders(walletCtx: WalletContext) {
   const zkConfigProvider = new NodeZkConfigProvider(zkConfigPath);
   const accountId = walletCtx.unshieldedKeystore.getBech32Address().toString();
 
+  const basePrivateStateProvider = levelPrivateStateProvider({
+    privateStateStoreName: 'shadow-kyc-state',
+    accountId,
+    privateStoragePasswordProvider: () => privateStatePassword,
+  });
+
+  const privateStateProvider = {
+    ...basePrivateStateProvider,
+    get: async () => StateValue.newNull(),
+    set: async () => {},
+  };
+
   return {
-    privateStateProvider: levelPrivateStateProvider({
-      privateStateStoreName: 'shadow-kyc-state',
-      accountId,
-      privateStoragePasswordProvider: () => privateStatePassword,
-    }),
+    privateStateProvider: privateStateProvider as any,
     publicDataProvider: indexerPublicDataProvider(networkConfig.indexer, networkConfig.indexerWS),
     zkConfigProvider,
     proofProvider: httpClientProofProvider(networkConfig.proofServer, zkConfigProvider),
@@ -135,6 +143,31 @@ function withLock<T>(fn: () => Promise<T>): Promise<T> {
     () => undefined,
   );
   return run;
+}
+
+/**
+ * Translate a raw Compact runtime assertion error into a short, friendly message.
+ * Returns null if the error is not a known contract assertion.
+ */
+function friendlyContractError(e: any): string | null {
+  const raw: string = e?.message ?? String(e);
+  if (/Credential request already pending/i.test(raw))
+    return 'You already have a pending credential request. Please wait for the authority to approve it.';
+  if (/Credential already issued/i.test(raw))
+    return 'Your credential has already been approved. No need to request again.';
+  if (/No pending credential with this commitment/i.test(raw))
+    return 'No pending credential found with that commitment hash.';
+  if (/Only the authority can approve/i.test(raw))
+    return 'Only the KYC authority wallet can approve credentials.';
+  if (/Only the authority can revoke/i.test(raw))
+    return 'Only the KYC authority wallet can revoke credentials.';
+  if (/Credential not approved/i.test(raw))
+    return 'This credential has not been approved yet.';
+  if (/Credential revoked/i.test(raw))
+    return 'This credential has been revoked and cannot be used to prove eligibility.';
+  if (/You do not hold this credential/i.test(raw))
+    return 'Your wallet secret does not match this credential commitment.';
+  return null;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -262,6 +295,8 @@ async function main() {
     void handleRequest(_serverCtx, req, res, deployment);
   });
 
+  server.setTimeout(180000); // 3 minutes — ZK proofs can take 30-60s
+
   server.listen(PORT, () => {
     console.log(`\n╔══════════════════════════════════════════════════════════════╗`);
     console.log(`║  API server ready                                          ║`);
@@ -270,6 +305,16 @@ async function main() {
     console.log(`║    UI:     http://localhost:${PORT}                          ║`);
     console.log(`╚══════════════════════════════════════════════════════════════╝\n`);
     console.log('  Press Ctrl+C to stop.\n');
+  });
+
+  server.on('error', (err: any) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`\n  ⚠ Port ${PORT} is already in use.`);
+      console.error(`  → Run this command to free it and try again:\n`);
+      console.error(`      lsof -ti :${PORT} | xargs kill -9\n`);
+      process.exit(1);
+    }
+    throw err;
   });
 
   // Connect wallet + contract in background (non-blocking).
@@ -541,6 +586,14 @@ async function route(
         txId = tx.public.txId;
         blockHeight = tx.public.blockHeight;
       } catch (e: any) {
+        const friendly = friendlyContractError(e);
+        if (friendly) {
+          json(res, 409, { error: friendly });
+          return;
+        }
+        if (network !== 'undeployed') {
+          throw e;
+        }
         console.log(`  ℹ On-chain tx fallback (${e.message || e})`);
         if (!demoLedgerState.pendingCredentials.includes(commitment)) {
           demoLedgerState.pendingCredentials.push(commitment);
@@ -577,6 +630,14 @@ async function route(
         txId = tx.public.txId;
         blockHeight = tx.public.blockHeight;
       } catch (e: any) {
+        const friendly = friendlyContractError(e);
+        if (friendly) {
+          json(res, 409, { error: friendly });
+          return;
+        }
+        if (network !== 'undeployed') {
+          throw e;
+        }
         console.log(`  ℹ On-chain tx fallback (${e.message || e})`);
         demoLedgerState.pendingCredentials = demoLedgerState.pendingCredentials.filter((c) => c !== commitment);
         if (!demoLedgerState.credentials.includes(commitment)) {
@@ -615,6 +676,14 @@ async function route(
         txId = tx.public.txId;
         blockHeight = tx.public.blockHeight;
       } catch (e: any) {
+        const friendly = friendlyContractError(e);
+        if (friendly) {
+          json(res, 409, { error: friendly });
+          return;
+        }
+        if (network !== 'undeployed') {
+          throw e;
+        }
         console.log(`  ℹ On-chain tx fallback (${e.message || e})`);
         demoLedgerState.eligibilityCount += 1;
       }
@@ -647,6 +716,14 @@ async function route(
         txId = tx.public.txId;
         blockHeight = tx.public.blockHeight;
       } catch (e: any) {
+        const friendly = friendlyContractError(e);
+        if (friendly) {
+          json(res, 409, { error: friendly });
+          return;
+        }
+        if (network !== 'undeployed') {
+          throw e;
+        }
         console.log(`  ℹ On-chain tx fallback (${e.message || e})`);
         demoLedgerState.credentials = demoLedgerState.credentials.filter((c) => c !== commitment);
         if (!demoLedgerState.revokedCredentials.includes(commitment)) {
@@ -682,6 +759,16 @@ async function getLatestLedger(providers: any | null, contractAddress: string) {
     } catch {
       // Fallback to demo state
     }
+  }
+  if (network !== 'undeployed') {
+    return {
+      authority: contractAddress,
+      authorityName: 'Shadow-KYC Authority',
+      pendingCredentials: [],
+      credentials: [],
+      revokedCredentials: [],
+      eligibilityCount: '0',
+    };
   }
   // Demo / offline state
   return {

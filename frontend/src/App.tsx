@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 
 declare global {
   interface Window {
@@ -64,22 +64,8 @@ interface Toast {
 // ─── Main Component ────────────────────────────────────────────────────────────
 
 function App() {
-  const [status, setStatus] = useState<ServerStatus | null>({
-    server: 'shadow-kyc-api',
-    network: 'undeployed',
-    contractAddress: import.meta.env.VITE_CONTRACT_ADDRESS || '441b38cab94500e09d6adb799fcecfa00537578c1e46b393ef893eb2c2361ac2',
-    authorityPublicKey: '04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e',
-    frontendBuilt: true,
-    timestamp: new Date().toISOString(),
-  })
-  const [state, setState] = useState<ContractState | null>({
-    authority: '04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e',
-    authorityName: 'Midnight KYC Authority',
-    pendingCredentials: [],
-    credentials: ['a1b2c3d4e5f60718293a4b5c6d7e8f901234567890abcdef1234567890abcdef'],
-    revokedCredentials: [],
-    eligibilityCount: '1',
-  })
+  const [status, setStatus] = useState<ServerStatus | null>(null)
+  const [state, setState] = useState<ContractState | null>(null)
   const [balance, setBalance] = useState<BalanceInfo | null>(null)
   const [history, setHistory] = useState<AuditRecord[]>([])
   const [loading, setLoading] = useState(false)
@@ -95,6 +81,8 @@ function App() {
   const [availableWallets, setAvailableWallets] = useState<Array<{ id: string; name: string }>>([])
   const [isConnectingWallet, setIsConnectingWallet] = useState(false)
   const [txProgress, setTxProgress] = useState<TxModalProgressState | null>(null)
+
+
 
   const showToast = useCallback((kind: Toast['kind'], text: string) => {
     setToast({ kind, text })
@@ -132,7 +120,8 @@ function App() {
       const wallet = window.midnight[walletId]
       console.log(`[Wallet Connection] Connecting to ${walletId}...`, wallet)
 
-      const activeNet = status?.network === 'preview' ? 'preview' : (status?.network || 'testnet')
+      const defaultNet = import.meta.env.VITE_NETWORK || 'undeployed'
+      const activeNet = (status?.network || defaultNet) === 'preview' ? 'preview' : (((status?.network || defaultNet) === 'preprod') ? 'preprod' : 'testnet')
       let walletApi: any = null
 
       // Multi-network & fallback connection attempt
@@ -202,16 +191,41 @@ function App() {
         console.warn('[Wallet Connection] Balance query warning:', balErr)
       }
 
+      // Safe address conversion helper
+      const extractAddressStr = (addrObj: any): string => {
+        if (!addrObj) return 'mn_wallet_account';
+        if (typeof addrObj === 'string') return addrObj;
+        if (typeof addrObj === 'object') {
+          if (typeof addrObj.address === 'string') return addrObj.address;
+          if (typeof addrObj.bech32 === 'string') return addrObj.bech32;
+          if (typeof addrObj.bech32Address === 'string') return addrObj.bech32Address;
+          if (typeof addrObj.value === 'string') return addrObj.value;
+          if (typeof addrObj.toString === 'function') {
+            const s = addrObj.toString();
+            if (s && s !== '[object Object]') return s;
+          }
+          try {
+            const serialized = JSON.stringify(addrObj);
+            const match = serialized.match(/"(mn_addr_[a-z0-9]+)"/i) || serialized.match(/"address"\s*:\s*"(.*?)"/);
+            if (match && match[1]) return match[1];
+          } catch {}
+        }
+        return String(addrObj);
+      };
+
+      const finalAddress = extractAddressStr(address);
+
       const walletObj: ConnectedWalletInfo = {
         id: walletId,
         name: wallet.name || walletId,
-        address: typeof address === 'string' ? address : String(address),
+        address: finalAddress,
         tNight: rawBalance,
         dust: '100',
-        network: status?.network === 'preview' ? 'Midnight Preview' : 'Midnight Network',
+        network: (status?.network || defaultNet) === 'preview' ? 'Midnight Preview' : 'Midnight Network',
         isWebWallet: false,
       }
 
+      localStorage.setItem('connectedWalletId', walletId)
       setConnectedWallet(walletObj)
       setShowWalletModal(false)
       setShowWalletSuccessPop(walletObj)
@@ -224,17 +238,30 @@ function App() {
     }
   }, [status, showToast])
 
+  const autoConnectedRef = useRef(false)
+
+  useEffect(() => {
+    if (availableWallets.length > 0 && !connectedWallet && !autoConnectedRef.current) {
+      const savedId = localStorage.getItem('connectedWalletId')
+      if (savedId && availableWallets.some(w => w.id === savedId)) {
+        autoConnectedRef.current = true
+        void connectWallet(savedId)
+      }
+    }
+  }, [availableWallets, connectedWallet, connectWallet])
+
   const connectWebWallet = useCallback(() => {
     setIsConnectingWallet(true)
     setTimeout(() => {
       const randomHexAdd = 'mn_1' + Array.from({ length: 36 }, () => Math.floor(Math.random() * 16).toString(16)).join('')
+      const defaultNet = import.meta.env.VITE_NETWORK || 'undeployed'
       const walletObj: ConnectedWalletInfo = {
         id: 'web-wallet',
         name: 'Midnight Devnet Web Wallet',
         address: randomHexAdd,
         tNight: '10000',
         dust: '500',
-        network: status?.network === 'preview' ? 'Midnight Preview' : 'Midnight Local Devnet',
+        network: (status?.network || defaultNet) === 'preview' ? 'Midnight Preview' : 'Midnight Local Devnet',
         isWebWallet: true,
       }
       setConnectedWallet(walletObj)
@@ -248,6 +275,7 @@ function App() {
   const disconnectWallet = useCallback(() => {
     setConnectedWallet(null)
     setShowWalletSuccessPop(null)
+    localStorage.removeItem('connectedWalletId')
     showToast('info', 'Wallet disconnected')
   }, [showToast])
 
@@ -262,7 +290,7 @@ function App() {
         api.getStatus().catch(() => null),
         api.getState().catch(() => null),
       ])
-      if (s) setStatus(s)
+      setStatus(s)
       if (st) setState(st)
 
       const [b, h] = await Promise.allSettled([
@@ -330,10 +358,12 @@ function App() {
         await refresh()
       } catch (err: any) {
         const errMsg = err instanceof Error ? err.message : `${title} failed`
+        // Contract assertion errors (409) are warnings, not fatal errors
+        const isWarning = errMsg.includes('Please wait') || errMsg.includes('already') || errMsg.includes('Only the') || errMsg.includes('does not match') || errMsg.includes('not been approved') || errMsg.includes('been revoked') || errMsg.includes('No pending')
         setTxProgress((prev) =>
           prev ? { ...prev, step: 'error', error: errMsg } : null
         )
-        showToast('error', errMsg)
+        showToast(isWarning ? 'info' : 'error', errMsg)
       } finally {
         setBusy(null)
       }
@@ -765,13 +795,27 @@ function App() {
               </div>
             )}
 
-            {txProgress.step === 'error' && (
-              <div className="wallet-pop-details" style={{ borderColor: 'var(--rose-border)', background: 'rgba(244, 63, 94, 0.08)' }}>
-                <p style={{ margin: 0, fontWeight: 600, color: 'var(--rose)', fontSize: 14 }}>
-                  ❌ Transaction Error: {txProgress.error}
-                </p>
-              </div>
-            )}
+            {txProgress.step === 'error' && (() => {
+              const isWarning = txProgress.error && (
+                txProgress.error.includes('Please wait') ||
+                txProgress.error.includes('already') ||
+                txProgress.error.includes('Only the') ||
+                txProgress.error.includes('does not match') ||
+                txProgress.error.includes('not been approved') ||
+                txProgress.error.includes('been revoked') ||
+                txProgress.error.includes('No pending')
+              )
+              return (
+                <div className="wallet-pop-details" style={{
+                  borderColor: isWarning ? 'var(--amber, #f59e0b)' : 'var(--rose-border)',
+                  background: isWarning ? 'rgba(245, 158, 11, 0.08)' : 'rgba(244, 63, 94, 0.08)'
+                }}>
+                  <p style={{ margin: 0, fontWeight: 600, color: isWarning ? '#f59e0b' : 'var(--rose)', fontSize: 14 }}>
+                    {isWarning ? '⚠️' : '❌'} {isWarning ? '' : 'Transaction Error: '}{txProgress.error}
+                  </p>
+                </div>
+              )
+            })()}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
               {txProgress.step === 'done' || txProgress.step === 'error' ? (

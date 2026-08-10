@@ -85,6 +85,7 @@ export function isNetworkId(v: unknown): v is NetworkId {
 
 export interface FsOptions {
   cwd?: string;
+  env?: NodeJS.ProcessEnv;
 }
 
 function statePath(opts: FsOptions = {}): string {
@@ -154,7 +155,7 @@ export interface ResolveOptions {
   cwd?: string;
 }
 
-export type ResolveSource = 'flag' | 'state' | 'default';
+export type ResolveSource = 'flag' | 'env' | 'state' | 'default';
 
 export interface ResolveResult {
   network: NetworkId;
@@ -188,9 +189,14 @@ export function resolveNetwork(opts: ResolveOptions = {}): ResolveResult {
   let network: NetworkId;
   let source: ResolveSource;
 
+  const envNet = env.MIDNIGHT_NETWORK || env.NETWORK || env.VITE_NETWORK;
+
   if (flag) {
     network = flag;
     source = 'flag';
+  } else if (envNet && isNetworkId(envNet)) {
+    network = envNet;
+    source = 'env';
   } else {
     const state = loadState({ cwd });
     if (state) {

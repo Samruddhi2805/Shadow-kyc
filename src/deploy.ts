@@ -19,6 +19,7 @@ import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-p
 import { levelPrivateStateProvider } from '@midnight-ntwrk/midnight-js-level-private-state-provider';
 import { NodeZkConfigProvider } from '@midnight-ntwrk/midnight-js-node-zk-config-provider';
 import { CompiledContract } from '@midnight-ntwrk/midnight-js-protocol/compact-js';
+import { StateValue } from '@midnight-ntwrk/compact-runtime';
 
 // @ts-expect-error Required for wallet sync
 globalThis.WebSocket = WebSocket;
@@ -81,9 +82,9 @@ const ShadowKyc = await import(pathToFileURL(contractPath).href);
 
 const compiledContract = CompiledContract.make('shadow-kyc', ShadowKyc.Contract).pipe(
   CompiledContract.withWitnesses({
-    localSecret: () => {
+    localSecret: (context: any) => {
       const secret = new Uint8Array(Buffer.from(SEED, 'hex'));
-      return [secret, secret];
+      return [context.privateState, secret];
     },
   }),
   CompiledContract.withCompiledFileAssets(zkConfigPath),
@@ -118,12 +119,20 @@ async function createProviders(walletCtx: WalletContext) {
   const zkConfigProvider = new NodeZkConfigProvider(zkConfigPath);
   const accountId = walletCtx.unshieldedKeystore.getBech32Address().toString();
 
+  const basePrivateStateProvider = levelPrivateStateProvider({
+    privateStateStoreName: 'shadow-kyc-state',
+    accountId,
+    privateStoragePasswordProvider: () => privateStatePassword,
+  });
+
+  const privateStateProvider = {
+    ...basePrivateStateProvider,
+    get: async () => StateValue.newNull(),
+    set: async () => {},
+  };
+
   return {
-    privateStateProvider: levelPrivateStateProvider({
-      privateStateStoreName: 'shadow-kyc-state',
-      accountId,
-      privateStoragePasswordProvider: () => privateStatePassword,
-    }),
+    privateStateProvider: privateStateProvider as any,
     publicDataProvider: indexerPublicDataProvider(networkConfig.indexer, networkConfig.indexerWS),
     zkConfigProvider,
     proofProvider: httpClientProofProvider(networkConfig.proofServer, zkConfigProvider),
@@ -298,7 +307,7 @@ async function main() {
         compiledContract: compiledContract as any,
         args: ['Shadow-KYC Authority'],
         privateStateId: PRIVATE_STATE_ID,
-        initialPrivateState: {},
+        initialPrivateState: StateValue.newNull(),
       });
       break;
     } catch (err: any) {

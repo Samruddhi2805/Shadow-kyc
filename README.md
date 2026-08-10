@@ -1,39 +1,108 @@
 # 🛡️ Shadow-KYC
 
-> Privacy-preserving KYC/AML verification using Zero-Knowledge Proofs (ZKPs) on the Midnight Network.
+> Privacy-preserving KYC/AML verification using Zero-Knowledge Proofs (ZKPs) on the Midnight Preview Testnet.
 
-Shadow-KYC is a decentralized KYC/AML system built using **Midnight Network**, **Compact Smart Contracts**, **React**, and **TypeScript**. It allows users to request identity verification and prove eligibility **without revealing their personal information**.
+Shadow-KYC is a decentralized KYC/AML system built on the **Midnight Network** using **Compact Smart Contracts**, **React**, **TypeScript**, and the **Midnight.js SDK**. Users can request identity verification and prove regulatory eligibility **without ever revealing their personal information** — the secret stays private, only its cryptographic commitment goes on-chain.
+
+---
+
+## 🎯 What This Does
+
+Shadow-KYC is a privacy-preserving KYC/AML verification system built on Midnight. Users can request and prove ownership of an approved KYC credential without revealing their underlying secret or identity on-chain. The blockchain stores cryptographic credential commitments and public verification state while sensitive identity information remains private.
 
 ---
 
 ## ✨ Features
 
 - 🔒 Privacy-preserving identity verification using Zero-Knowledge Proofs (ZKPs)
-- 📄 Request KYC/AML credentials
-- ✅ Authority approval workflow
-- ❌ Credential revocation
-- 📜 On-chain credential registry
+- 📄 Request KYC/AML credentials (user action, ZK proof generated)
+- ✅ Authority approval workflow (on-chain Compact circuit)
+- ❌ Credential revocation by authority
+- 📜 On-chain credential registry (Midnight Preview Testnet)
 - 📊 Audit history
-- 🌐 React + TypeScript frontend
-- ⚡ REST API backend
-- 🧪 Comprehensive smart contract tests (14/14 passing)
+- 🌐 React + TypeScript + Vite frontend with persistent wallet connection
+- ⚡ Node.js REST API backend
+- 🧪 14/14 smart contract tests passing
+
+---
+
+## 💡 Initial Product Idea
+
+Shadow-KYC aims to provide privacy-preserving KYC/AML verification for applications that need regulatory compliance without requiring users to repeatedly expose sensitive identity information. A user receives a cryptographic credential commitment after verification and can later prove eligibility using a zero-knowledge proof, allowing applications to verify compliance while minimizing exposure of personal data.
+
+---
+
+## 📜 Contract Address
+
+| Network | Contract Address |
+|---------|-----------------|
+| Preview | `3508cc15dd43ad50f9af84d722fd71aba6b9a45eea6731656e539c195499bbcb` |
+| Preprod | Not deployed |
 
 ---
 
 ## 🏗️ Architecture
 
 ```text
-                  React Frontend
-                        │
-                        ▼
-                 REST API Server
-                        │
-                        ▼
-          Compact Smart Contract (Midnight)
-                        │
-                        ▼
-            Midnight Local Dev Network
+  React Frontend (Vite)
+        │
+        ▼
+  REST API Server (Node.js)
+        │
+        ├─── Midnight JS SDK ──▶ Midnight Preview Network (RPC / Indexer)
+        │                              │
+        │                        Compact Smart Contract
+        │                        (shadow-kyc.compact)
+        │
+        └─── ZK Proof Server (Docker) — generates ZK proofs locally
 ```
+
+---
+
+## 🔐 Privacy Model
+
+The Compact smart contract separates what is public on-chain from what remains private as a zero-knowledge witness.
+
+### Public — visible on-chain
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `authority` | `Bytes<32>` | Authority dapp-specific public key (deliberately disclosed) |
+| `authorityName` | `Opaque<string>` | Authority public name (deliberately disclosed) |
+| `pendingCredentials` | `Set<Bytes<32>>` | Credential commitments awaiting approval |
+| `credentials` | `Set<Bytes<32>>` | Approved credential commitments |
+| `revokedCredentials` | `Set<Bytes<32>>` | Revoked credential commitments |
+| `eligibilityCount` | `Uint<64>` | Public counter of eligibility proofs performed |
+
+### Private — never revealed on-chain
+
+| Element | Description |
+|---------|-------------|
+| `localSecret()` witness | The caller's 32-byte secret used privately during proof generation; it is not stored in or revealed by the on-chain contract state |
+| User identity | The underlying identity information represented by the secret |
+
+The credential commitment is computed inside the circuit using Midnight's built-in `persistentHash`:
+
+```compact
+const commitment = persistentHash<Bytes<32>>(_secret);
+```
+
+The secret is a private witness — it is supplied during proof generation and is not revealed in on-chain state, events, or any contract output.
+
+### What the user proves without revealing
+
+The `proveEligibility()` circuit proves that the user knows the secret corresponding to an approved credential commitment, without revealing the secret itself:
+
+```compact
+assert(persistentHash<Bytes<32>>(_secret) == credentialCommitment, "You do not hold this credential");
+assert(credentials.member(disclose(credentialCommitment)), "Credential not approved");
+assert(!revokedCredentials.member(disclose(credentialCommitment)), "Credential revoked");
+eligibilityCount = (eligibilityCount + 1) as Uint<64>;
+```
+
+An on-chain observer **CAN** see: a credential exists, was approved by the authority, and that *someone* proved eligibility.
+
+An on-chain observer **CANNOT** see: WHO holds the credential, what the secret is, or which user maps to which commitment.
 
 ---
 
@@ -41,69 +110,106 @@ Shadow-KYC is a decentralized KYC/AML system built using **Midnight Network**, *
 
 | Layer | Technology |
 |--------|------------|
-| Smart Contract | Compact |
-| Blockchain | Midnight Network |
+| Smart Contract | Compact (Midnight DSL) |
+| Blockchain | Midnight Preview Testnet |
 | Frontend | React + TypeScript + Vite |
 | Backend | Node.js + REST API |
-| Language | TypeScript |
+| Wallet | 1AM Wallet (Chrome Extension) |
+| ZK Proofs | Midnight Proof Server (Docker) |
 | Testing | Vitest |
 
 ---
 
 ## 🚀 Getting Started
 
-Clone the repository:
+### Prerequisites
+
+- Node.js >= 22
+- Docker Desktop (with WSL2 integration enabled)
+- 1AM Wallet browser extension (set to **Preview Testnet**)
+- Compact compiler (from [Midnight Developer Hub](https://midnight.network))
+
+### Install
 
 ```bash
 git clone https://github.com/Samruddhi2805/shadow-kyc.git
 cd shadow-kyc
-```
-
-Install dependencies:
-
-```bash
 npm install
 ```
 
-Compile the smart contract:
-
-```bash
-npm run compile
-```
-
-Start the local proof server:
+### Start Infrastructure (Docker)
 
 ```bash
 npm run proof-server:start
 ```
 
-Deploy the contract locally:
+This starts three containers:
+- `risein-proof-server` — local ZK proof generation (port 6300)
+- `risein-node` — Midnight relay node
+- `risein-indexer` — contract state indexer (port 8088)
+
+### Compile the Smart Contract
 
 ```bash
-npm run deploy
+npm run compile
 ```
 
-Start the backend API:
+Expected output:
+```
+Compiling 4 circuits:
+circuit "approveCredential" (k=13, rows=4459)
+circuit "issueCredential"   (k=13, rows=2281)
+circuit "proveEligibility"  (k=13, rows=2631)
+circuit "revokeCredential"  (k=13, rows=4459)
+```
+
+### Start the API Server
 
 ```bash
 npm run api
 ```
 
-Start the frontend:
+> If port 8080 is already in use, free it first: `lsof -ti :8080 | xargs kill -9`
+> Or use the convenience script: `npm run api:fresh`
+
+### Start the Frontend
 
 ```bash
 npm run frontend:dev
+```
+
+Then open http://localhost:5173 (or http://localhost:8080 for the API-served static build).
+
+### Deploy to Preview Testnet
+
+```bash
+npm run deploy -- --network preview
 ```
 
 ---
 
 ## ✅ Running Tests
 
-Run all smart contract tests:
-
 ```bash
 npm test
 ```
+
+Expected output:
+
+```
+✓ tests/shadow-kyc.test.ts (14 tests) ~330ms
+Test Files  1 passed (1)
+    Tests  14 passed (14)
+```
+
+Test coverage includes:
+
+- Constructor: authority name set, credential sets initialized empty
+- `issueCredential`: adds commitment to pending set, rejects duplicates
+- `approveCredential`: authority can approve, non-authority is rejected
+- `proveEligibility`: approved credential passes, unapproved and revoked are rejected
+- `revokeCredential`: authority can revoke, non-authority is rejected
+- Privacy: user secret and authority secret never appear in ledger state or proof transcript
 
 Build the frontend:
 
@@ -111,47 +217,67 @@ Build the frontend:
 npm run frontend:build
 ```
 
-Current project status:
-
-- ✅ 14/14 Smart Contract Tests Passing
-- ✅ Frontend Build Passing
-- ✅ REST API Working
-- ✅ Local Development Environment
-
 ---
 
-# ⚠️ Current Deployment Status
-
-> **This project currently runs on the Midnight Local Development Network only.**
-
-The application is designed and tested in a **local Midnight development environment**. It is **not yet deployed** to the public Midnight Preview Network or Mainnet.
-
-### Current Status
+## 🌐 Deployment Status
 
 | Feature | Status |
 |---------|--------|
-| Local Midnight Dev Network | ✅ |
-| Smart Contract | ✅ |
-| REST API | ✅ |
-| React Frontend | ✅ |
-| Preview Network Deployment | ❌ |
-| Mainnet Deployment | ❌ |
+| Smart Contract (Compact) | ✅ Deployed |
+| Midnight Preview Testnet | ✅ Connected |
+| Contract Address | `3508cc15dd43ad50f9af84d722fd71aba6b9a45eea6731656e539c195499bbcb` |
+| REST API | ✅ Running |
+| React Frontend | ✅ Running |
+| ZK Proof Generation | ✅ Working (Docker proof-server) |
+| 1AM Wallet Integration | ✅ Working |
+| On-chain Credential Requests | ✅ Working |
+| On-chain Credential Approval | ✅ Working |
+| On-chain ZK Eligibility Proof | ✅ Working |
 
-The frontend may display:
+---
 
-```text
-Network: undeployed
-```
+## 🔄 Full User Flow
 
-This is expected because the project is currently configured for **local development only**.
+1. **Connect Wallet** — Connect 1AM wallet (Preview Testnet) in the UI
+2. **Request Credential** — User calls `issueCredential()` circuit:
+   - `localSecret()` is supplied as a private witness during proof generation and is not revealed in on-chain state
+   - A `persistentHash` commitment is computed from the secret
+   - The commitment (not the secret) is stored in `pendingCredentials` on-chain
+3. **Authority Approves** — Authority calls `approveCredential(commitment)`:
+   - ZK proof verifies the caller is the registered authority
+   - Commitment moves from `pendingCredentials` to `credentials`
+4. **Prove Eligibility** — User calls `proveEligibility(commitment)`:
+   - ZK proof proves knowledge of the secret behind the commitment
+   - `eligibilityCount` increments — eligibility verified without revealing identity
+5. **Revoke (optional)** — Authority can call `revokeCredential(commitment)`
 
 ---
 
 ## 🔐 Why Zero-Knowledge Proofs?
 
-Traditional KYC systems require users to reveal sensitive personal information.
+Traditional KYC systems require users to reveal sensitive personal documents. Shadow-KYC uses Zero-Knowledge Proofs to let users prove they hold a valid, authority-approved credential **without** revealing who they are or what information they submitted.
 
-Shadow-KYC uses **Zero-Knowledge Proofs (ZKPs)** to allow users to prove they possess a valid credential **without revealing their identity or private data**, improving privacy while maintaining regulatory compliance.
+An on-chain observer **CAN** see: a credential exists, was approved, someone proved eligibility.
+
+An on-chain observer **CANNOT** see: WHO the user is, what their secret is, or which user maps to which commitment.
+
+---
+
+## 📸 Level 1 Evidence
+
+### Successful Compact Compilation
+
+> 📌 **Insert screenshot here** showing the terminal output of `npm run compile` with all 4 circuits successfully compiled:
+> - `approveCredential` (k=13, rows=4459)
+> - `issueCredential` (k=13, rows=2281)
+> - `proveEligibility` (k=13, rows=2631)
+> - `revokeCredential` (k=13, rows=4459)
+
+### Preview Contract Deployment
+
+> 📌 **Insert screenshot here** showing the terminal output of `npm run deploy -- --network preview` with:
+> - Successful deployment confirmation
+> - Contract address: `3508cc15dd43ad50f9af84d722fd71aba6b9a45eea6731656e539c195499bbcb`
 
 ---
 
@@ -159,35 +285,38 @@ Shadow-KYC uses **Zero-Knowledge Proofs (ZKPs)** to allow users to prove they po
 
 ```text
 shadow-kyc/
-│
-├── contracts/        # Compact smart contracts
-├── frontend/         # React + TypeScript frontend
-├── scripts/          # Utility scripts
-├── src/              # Backend API & deployment logic
-├── tests/            # Smart contract tests
-├── package.json
-└── README.md
+├── contracts/
+│   ├── shadow-kyc.compact          # Compact smart contract source
+│   └── managed/
+│       └── shadow-kyc/             # Compiled artifacts (auto-generated)
+│           ├── contract/           # JS circuit binaries
+│           └── keys/               # Proving & verifying keys
+├── frontend/                       # React + TypeScript + Vite frontend
+│   └── src/
+│       ├── App.tsx                 # Main UI component
+│       ├── api.ts                  # API client
+│       └── types.ts                # Type definitions
+├── src/                            # Node.js backend
+│   ├── api-server.ts               # REST API + static file server
+│   ├── deploy.ts                   # Contract deployment script
+│   ├── cli.ts                      # Interactive CLI
+│   ├── network.ts                  # Network configuration
+│   └── wallet.ts                   # Wallet management
+├── tests/
+│   └── shadow-kyc.test.ts          # 14 Vitest smart contract tests
+├── compose.yml                     # Docker compose services
+└── package.json
 ```
 
----
-
-## 🔮 Future Improvements
-
-- Deploy to Midnight Preview Network
-- Real wallet authentication
-- Multi-authority credential issuance
-- Decentralized Identity (DID) support
-- IPFS document storage
-- Role-based access control
-- Production deployment
+> **Security:** Do not commit `.env` files, wallet seeds, private keys, or private-state passwords. Configure sensitive values locally.
 
 ---
 
-## 👨‍💻 Author
+## 👩‍💻 Author
 
 **Samruddhi Nevse**
 
-GitHub: https://github.com/Samruddhi2805
+GitHub: [https://github.com/Samruddhi2805](https://github.com/Samruddhi2805)
 
 ---
 

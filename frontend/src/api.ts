@@ -16,11 +16,13 @@ import type {
 
 const BASE = '/api';
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit & { timeout?: number }): Promise<T> {
+  const timeoutMs = init?.timeout ?? (init?.method === 'POST' ? 120000 : 5000);
+  const { timeout, ...fetchInit } = init || {};
   const res = await fetch(`${BASE}${path}`, {
     headers: { 'Content-Type': 'application/json' },
-    signal: AbortSignal.timeout(3000),
-    ...init,
+    signal: AbortSignal.timeout(timeoutMs),
+    ...fetchInit,
   });
 
   let body: unknown = null;
