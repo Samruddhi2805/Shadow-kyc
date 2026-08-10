@@ -66,7 +66,7 @@ The Compact smart contract separates what is public on-chain from what remains p
 ### Public — visible on-chain
 
 | Field | Type | Description |
-|-------|------|-------------|
+|---|---|---|
 | `authority` | `Bytes<32>` | Authority dapp-specific public key (deliberately disclosed) |
 | `authorityName` | `Opaque<string>` | Authority public name (deliberately disclosed) |
 | `pendingCredentials` | `Set<Bytes<32>>` | Credential commitments awaiting approval |
@@ -74,35 +74,18 @@ The Compact smart contract separates what is public on-chain from what remains p
 | `revokedCredentials` | `Set<Bytes<32>>` | Revoked credential commitments |
 | `eligibilityCount` | `Uint<64>` | Public counter of eligibility proofs performed |
 
-### Private — never revealed on-chain
+### Private — not revealed in on-chain state
 
 | Element | Description |
-|---------|-------------|
+|---|---|
 | `localSecret()` witness | The caller's 32-byte secret used privately during proof generation; it is not stored in or revealed by the on-chain contract state |
 | User identity | The underlying identity information represented by the secret |
 
-The credential commitment is computed inside the circuit using Midnight's built-in `persistentHash`:
-
-```compact
-const commitment = persistentHash<Bytes<32>>(_secret);
-```
-
-The secret is a private witness — it is supplied during proof generation and is not revealed in on-chain state, events, or any contract output.
+The credential commitment is computed inside the circuit using Midnight's built-in `persistentHash`.
 
 ### What the user proves without revealing
 
-The `proveEligibility()` circuit proves that the user knows the secret corresponding to an approved credential commitment, without revealing the secret itself:
-
-```compact
-assert(persistentHash<Bytes<32>>(_secret) == credentialCommitment, "You do not hold this credential");
-assert(credentials.member(disclose(credentialCommitment)), "Credential not approved");
-assert(!revokedCredentials.member(disclose(credentialCommitment)), "Credential revoked");
-eligibilityCount = (eligibilityCount + 1) as Uint<64>;
-```
-
-An on-chain observer **CAN** see: a credential exists, was approved by the authority, and that *someone* proved eligibility.
-
-An on-chain observer **CANNOT** see: WHO holds the credential, what the secret is, or which user maps to which commitment.
+The `proveEligibility()` circuit proves that the user knows the secret corresponding to an approved credential commitment without revealing the secret itself.
 
 ---
 
@@ -222,17 +205,14 @@ npm run frontend:build
 ## 🌐 Deployment Status
 
 | Feature | Status |
-|---------|--------|
-| Smart Contract (Compact) | ✅ Deployed |
-| Midnight Preview Testnet | ✅ Connected |
+|---|---|
+| Smart Contract | ✅ Deployed |
+| Midnight Preview Testnet | ✅ Deployed |
 | Contract Address | `3508cc15dd43ad50f9af84d722fd71aba6b9a45eea6731656e539c195499bbcb` |
-| REST API | ✅ Running |
-| React Frontend | ✅ Running |
-| ZK Proof Generation | ✅ Working (Docker proof-server) |
-| 1AM Wallet Integration | ✅ Working |
-| On-chain Credential Requests | ✅ Working |
-| On-chain Credential Approval | ✅ Working |
-| On-chain ZK Eligibility Proof | ✅ Working |
+| REST API | ✅ Working |
+| React Frontend | ✅ Working |
+| ZK Proof Generation | ✅ Working |
+| Wallet Integration | ✅ Working |
 
 ---
 
