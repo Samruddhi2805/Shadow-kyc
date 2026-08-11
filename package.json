@@ -7,7 +7,8 @@
   "license": "MIT",
   "scripts": {
     "compile": "export PATH=\"$HOME/.local/bin:$PATH\"; compact compile contracts/shadow-kyc.compact contracts/managed/shadow-kyc",
-    "build": "npx tsc --noEmit || true",
+    "compile:frontend": "npm run compile && rm -rf frontend/public/keys frontend/public/zkir && mkdir -p frontend/public/keys frontend/public/zkir && cp -r contracts/managed/shadow-kyc/keys/* frontend/public/keys/ && cp -r contracts/managed/shadow-kyc/zkir/* frontend/public/zkir/",
+    "build": "npx tsc --noEmit",
     "setup": "npx tsx src/setup.ts",
     "deploy": "npx tsx src/deploy.ts",
     "cli": "npx tsx src/cli.ts",

@@ -1,4 +1,14 @@
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
+import { Buffer } from 'buffer'
+import { findDeployedContract } from '@midnight-ntwrk/midnight-js-contracts'
+import { FetchZkConfigProvider } from '@midnight-ntwrk/midnight-js-fetch-zk-config-provider'
+import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider'
+import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider'
+import { inMemoryPrivateStateProvider } from './in-memory-private-state-provider'
+import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id'
+import { Transaction } from '@midnight-ntwrk/midnight-js-protocol/ledger'
+import { CompiledContract } from '@midnight-ntwrk/midnight-js-protocol/compact-js'
+import * as ShadowKyc from '../../contracts/managed/shadow-kyc/contract/index.js'
 
 declare global {
   interface Window {
@@ -44,6 +54,26 @@ function formatNetworkName(net?: string): string {
   return net
 }
 
+interface ShadowKycPrivateState {
+  readonly localSecret: Uint8Array;
+}
+
+// Deterministically generate a 32-byte secret based on the user's wallet address
+async function getDeterministicSecret(address: string): Promise<Uint8Array> {
+  if (!address) return new Uint8Array(32);
+  const encoder = new TextEncoder();
+  const data = encoder.encode(`shadow-kyc:user-secret:${address}`);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  return new Uint8Array(hashBuffer);
+}
+
+// Compute the exact SHA-256 hash (persistentHash) of the user's secret
+async function computeRealCommitment(secret: globalThis.Uint8Array): Promise<string> {
+  const hashBuffer = await crypto.subtle.digest('SHA-256', secret.buffer as ArrayBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 // Simple client-side hash simulation for the interactive ZK witness visualizer
 async function simulateCommitment(secret: string): Promise<string> {
   if (!secret) return '00'.repeat(32)
@@ -59,6 +89,112 @@ async function simulateCommitment(secret: string): Promise<string> {
 interface Toast {
   kind: 'success' | 'error' | 'info'
   text: string
+}
+
+// Initialize Midnight client-side providers using the connected Lace Wallet configuration
+async function initializeClientProviders(connectedAPI: any) {
+  console.log('[Providers] Fetching wallet connector configuration...');
+  const config = await connectedAPI.getConfiguration();
+  console.log('[Providers] Wallet Config:', config);
+  
+  // Set the network ID dynamically from the connected wallet
+  const networkId = config.networkId || import.meta.env.VITE_NETWORK || 'preprod';
+  setNetworkId(networkId as any);
+
+  // Set the indexer and prover endpoints dynamically from the connected wallet
+  const indexerUri = config.indexerUri;
+  const indexerWsUri = config.indexerWsUri;
+  const proverServerUri = config.proverServerUri || 'http://localhost:6300';
+
+  console.log(`[Providers] Target Network: ${networkId}`);
+  console.log(`[Providers] Indexer URI:    ${indexerUri}`);
+  console.log(`[Providers] Prover URI:     ${proverServerUri}`);
+
+  // Fetch ZK configs statically from the DApp public directory
+  const zkConfigPath = window.location.origin;
+  const keyMaterialProvider = new FetchZkConfigProvider(zkConfigPath, fetch.bind(window));
+  
+  // Create in-memory private state provider to avoid plaintext localStorage leaks
+  const privateStateProvider = inMemoryPrivateStateProvider<string, ShadowKycPrivateState>();
+  
+  // Wallet provider wrapping the connectedAPI
+  const walletProvider = {
+    getCoinPublicKey: async () => {
+      const addrs = await connectedAPI.getShieldedAddresses();
+      return addrs.shieldedCoinPublicKey;
+    },
+    getEncryptionPublicKey: async () => {
+      const addrs = await connectedAPI.getShieldedAddresses();
+      return addrs.shieldedEncryptionPublicKey;
+    },
+    balanceTx: async (tx: any, _ttl?: Date) => {
+      console.log('[Providers] Balancing transaction via connected wallet...', tx);
+      const serializedTx = Buffer.from(tx.serialize()).toString('hex');
+      const balanced = await connectedAPI.balanceUnsealedTransaction(serializedTx);
+      return Transaction.deserialize(
+        'signature',
+        'proof',
+        'binding',
+        Buffer.from(balanced.tx, 'hex'),
+      );
+    }
+  };
+
+  // Midnight provider wrapping the connectedAPI
+  const midnightProvider = {
+    submitTx: async (tx: any) => {
+      console.log('[Providers] Submitting transaction via connected wallet...', tx);
+      const serializedTx = Buffer.from(tx.serialize()).toString('hex');
+      await connectedAPI.submitTransaction(serializedTx);
+      const txIdentifiers = tx.identifiers();
+      console.log('[Providers] Submitted Tx IDs:', txIdentifiers);
+      return txIdentifiers[0]; // return the transaction ID
+    }
+  };
+
+  return {
+    privateStateProvider,
+    zkConfigProvider: keyMaterialProvider,
+    proofProvider: httpClientProofProvider(proverServerUri, keyMaterialProvider),
+    publicDataProvider: indexerPublicDataProvider(indexerUri, indexerWsUri),
+    walletProvider: walletProvider as any,
+    midnightProvider: midnightProvider as any,
+  };
+}
+
+// Join the deployed Shadow-KYC contract using client-side providers
+async function joinContract(
+  connectedAPI: any,
+  address: string,
+  contractAddress: string
+) {
+  const providers = await initializeClientProviders(connectedAPI);
+  providers.privateStateProvider.setContractAddress(contractAddress);
+
+  // Derive the user secret deterministically and initialize private state
+  const secret = await getDeterministicSecret(address);
+  const initialPrivateState = { localSecret: secret };
+  await providers.privateStateProvider.set('shadowKycPrivateState', initialPrivateState);
+
+  // Re-create the CompiledContract structure with client witnesses
+  const compiledContract = CompiledContract.make('shadow-kyc', ShadowKyc.Contract).pipe(
+    CompiledContract.withWitnesses({
+      localSecret: (context: any) => {
+        const secret = context.privateState.localSecret;
+        return [context.privateState, secret];
+      }
+    })
+  );
+
+  console.log('[Contract] Attempting to join contract at address:', contractAddress);
+  const deployed = await findDeployedContract(providers, {
+    contractAddress,
+    compiledContract: compiledContract as any,
+    privateStateId: 'shadowKycPrivateState',
+    initialPrivateState: initialPrivateState,
+  });
+
+  return { deployed, secret };
 }
 
 // ─── Main Component ────────────────────────────────────────────────────────────
@@ -81,6 +217,8 @@ function App() {
   const [availableWallets, setAvailableWallets] = useState<Array<{ id: string; name: string }>>([])
   const [isConnectingWallet, setIsConnectingWallet] = useState(false)
   const [txProgress, setTxProgress] = useState<TxModalProgressState | null>(null)
+  const [deployedContract, setDeployedContract] = useState<any>(null)
+  const connectedApiRef = useRef<any>(null)
 
 
 
@@ -225,6 +363,22 @@ function App() {
         isWebWallet: false,
       }
 
+      connectedApiRef.current = walletApi;
+
+      // Join the deployed smart contract on Preprod
+      const contractAddress = status?.contractAddress || import.meta.env.VITE_CONTRACT_ADDRESS;
+      if (contractAddress && contractAddress !== '') {
+        try {
+          showToast('info', 'Connecting to Shadow-KYC smart contract and deriving secret...');
+          const result = await joinContract(walletApi, finalAddress, contractAddress);
+          console.log('[Contract Join] Successfully loaded contract client:', result.deployed);
+          setDeployedContract(result.deployed);
+        } catch (contractErr: any) {
+          console.error('[Contract Join Error]', contractErr);
+          showToast('error', `Contract connection failed: ${contractErr.message || contractErr}. Running in offline/read-only mode.`);
+        }
+      }
+
       localStorage.setItem('connectedWalletId', walletId)
       setConnectedWallet(walletObj)
       setShowWalletModal(false)
@@ -275,6 +429,8 @@ function App() {
   const disconnectWallet = useCallback(() => {
     setConnectedWallet(null)
     setShowWalletSuccessPop(null)
+    setDeployedContract(null)
+    connectedApiRef.current = null
     localStorage.removeItem('connectedWalletId')
     showToast('info', 'Wallet disconnected')
   }, [showToast])
@@ -388,14 +544,45 @@ function App() {
   }, [state])
 
   const handleIssue = useCallback(async () => {
-    let customC: string | undefined = undefined
-    if (connectedWallet) {
-      customC = await simulateCommitment(connectedWallet.address)
+    if (deployedContract && connectedWallet && !connectedWallet.isWebWallet) {
+      const secret = await getDeterministicSecret(connectedWallet.address);
+      const realCommitment = await computeRealCommitment(secret);
+      
+      void runTxWithModal('issueCredential', 'Request KYC Credential (Lace Wallet ZK)', realCommitment, async () => {
+        console.log('[Lace ZK] Calling issueCredential circuit...');
+        setTxProgress((prev: any) => prev ? { ...prev, step: 'proving', message: 'Generating local ZK proof...' } : null);
+        
+        // Execute the circuit client-side!
+        const tx = await deployedContract.callTx.issueCredential();
+        
+        setTxProgress((prev: any) => prev ? { ...prev, step: 'signing', message: 'Submitting transaction via Lace Wallet...', txId: tx.public.txId, blockHeight: tx.public.blockHeight } : null);
+        
+        // Log transaction to backend audit server
+        await api.recordAudit({
+          action: 'issueCredential',
+          txId: tx.public.txId,
+          blockHeight: tx.public.blockHeight,
+          commitment: realCommitment,
+          message: 'Credential request submitted client-side via Lace Wallet. ZK proof generated locally.',
+        }).catch(console.warn);
+
+        return {
+          txId: tx.public.txId,
+          blockHeight: tx.public.blockHeight,
+          commitment: realCommitment,
+          message: 'Credential request submitted client-side via Lace Wallet. ZK proof generated locally.',
+        };
+      });
+    } else {
+      let customC: string | undefined = undefined
+      if (connectedWallet) {
+        customC = await simulateCommitment(connectedWallet.address)
+      }
+      void runTxWithModal('issueCredential', 'Request KYC Credential', customC, () =>
+        api.issueCredential(customC)
+      )
     }
-    void runTxWithModal('issueCredential', 'Request KYC Credential', customC, () =>
-      api.issueCredential(customC)
-    )
-  }, [connectedWallet, runTxWithModal])
+  }, [deployedContract, connectedWallet, runTxWithModal])
 
   const handleApprove = useCallback(
     (commitment: string) => {
@@ -408,11 +595,40 @@ function App() {
 
   const handleProve = useCallback(
     (commitment: string) => {
-      void runTxWithModal('proveEligibility', 'Zero-Knowledge Prove Eligibility', commitment, () =>
-        api.proveEligibility(commitment)
-      )
+      if (deployedContract && connectedWallet && !connectedWallet.isWebWallet) {
+        void runTxWithModal('proveEligibility', 'ZK Prove Eligibility (Lace Wallet ZK)', commitment, async () => {
+          console.log('[Lace ZK] Calling proveEligibility circuit for commitment:', commitment);
+          setTxProgress((prev: any) => prev ? { ...prev, step: 'proving', message: 'Generating local ZK proof...' } : null);
+
+          // Convert hex commitment to Bytes<32>
+          const commitmentBytes = new Uint8Array(Buffer.from(commitment, 'hex'));
+          const tx = await deployedContract.callTx.proveEligibility(commitmentBytes);
+
+          setTxProgress((prev: any) => prev ? { ...prev, step: 'signing', message: 'Submitting transaction via Lace Wallet...', txId: tx.public.txId, blockHeight: tx.public.blockHeight } : null);
+
+          // Log transaction to backend audit server
+          await api.recordAudit({
+            action: 'proveEligibility',
+            txId: tx.public.txId,
+            blockHeight: tx.public.blockHeight,
+            commitment,
+            message: 'Eligibility proven client-side with a local ZK proof. Identity stays private.',
+          }).catch(console.warn);
+
+          return {
+            txId: tx.public.txId,
+            blockHeight: tx.public.blockHeight,
+            commitment,
+            message: 'Eligibility proven client-side with a local ZK proof. Identity stays private.',
+          };
+        });
+      } else {
+        void runTxWithModal('proveEligibility', 'Zero-Knowledge Prove Eligibility', commitment, () =>
+          api.proveEligibility(commitment)
+        )
+      }
     },
-    [runTxWithModal]
+    [deployedContract, connectedWallet, runTxWithModal]
   )
 
   const handleRevoke = useCallback(
@@ -430,10 +646,37 @@ function App() {
       showToast('error', 'Enter a valid 64-character hex commitment')
       return
     }
-    void runTxWithModal('proveEligibility', 'Zero-Knowledge Prove Custom Commitment', c, () =>
-      api.proveEligibility(c)
-    )
-  }, [commitmentInput, runTxWithModal, showToast])
+    if (deployedContract && connectedWallet && !connectedWallet.isWebWallet) {
+      void runTxWithModal('proveEligibility', 'ZK Prove Custom Commitment (Lace Wallet ZK)', c, async () => {
+        console.log('[Lace ZK] Calling proveEligibility circuit for custom commitment:', c);
+        setTxProgress((prev: any) => prev ? { ...prev, step: 'proving', message: 'Generating local ZK proof...' } : null);
+
+        const commitmentBytes = new Uint8Array(Buffer.from(c, 'hex'));
+        const tx = await deployedContract.callTx.proveEligibility(commitmentBytes);
+
+        setTxProgress((prev: any) => prev ? { ...prev, step: 'signing', message: 'Submitting transaction via Lace Wallet...', txId: tx.public.txId, blockHeight: tx.public.blockHeight } : null);
+
+        await api.recordAudit({
+          action: 'proveEligibility',
+          txId: tx.public.txId,
+          blockHeight: tx.public.blockHeight,
+          commitment: c,
+          message: 'Custom eligibility proven client-side with a local ZK proof.',
+        }).catch(console.warn);
+
+        return {
+          txId: tx.public.txId,
+          blockHeight: tx.public.blockHeight,
+          commitment: c,
+          message: 'Custom eligibility proven client-side with a local ZK proof.',
+        };
+      });
+    } else {
+      void runTxWithModal('proveEligibility', 'Zero-Knowledge Prove Custom Commitment', c, () =>
+        api.proveEligibility(c)
+      )
+    }
+  }, [commitmentInput, deployedContract, connectedWallet, runTxWithModal, showToast])
 
   if (loading) {
     return (

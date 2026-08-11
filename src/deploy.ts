@@ -77,12 +77,16 @@ if (!fs.existsSync(contractPath)) {
 }
 
 import { Buffer } from 'buffer';
+import type * as ShadowKycTypes from '../contracts/managed/shadow-kyc/contract/index.js';
 
 const ShadowKyc = await import(pathToFileURL(contractPath).href);
 
-const compiledContract = CompiledContract.make('shadow-kyc', ShadowKyc.Contract).pipe(
+const compiledContract = CompiledContract.make<ShadowKycTypes.Contract<unknown>>(
+  'shadow-kyc',
+  ShadowKyc.Contract,
+).pipe(
   CompiledContract.withWitnesses({
-    localSecret: (context: any) => {
+    localSecret: (context) => {
       const secret = new Uint8Array(Buffer.from(SEED, 'hex'));
       return [context.privateState, secret];
     },

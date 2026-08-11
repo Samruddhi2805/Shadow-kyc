@@ -51,14 +51,19 @@ if (!fs.existsSync(contractPath)) {
   process.exit(1);
 }
 
+import type * as ShadowKycTypes from '../contracts/managed/shadow-kyc/contract/index.js';
+
 const ShadowKyc = await import(pathToFileURL(contractPath).href);
 
 const { network, config: networkConfig } = resolveNetwork();
 const SEED = getOrCreateSeed(network);
 
-const compiledContract = CompiledContract.make('shadow-kyc', ShadowKyc.Contract).pipe(
+const compiledContract = CompiledContract.make<ShadowKycTypes.Contract<unknown>>(
+  'shadow-kyc',
+  ShadowKyc.Contract,
+).pipe(
   CompiledContract.withWitnesses({
-    localSecret: (context: any) => {
+    localSecret: (context) => {
       const secret = new Uint8Array(Buffer.from(SEED, 'hex'));
       return [context.privateState, secret];
     },
@@ -741,6 +746,18 @@ async function route(
     const message = 'Credential revoked.';
     recordAudit({ action: 'revokeCredential', txId, blockHeight, commitment, message });
     json(res, 200, { txId, blockHeight, commitment, message });
+    return;
+  }
+
+  // POST /api/audit
+  if (req.method === 'POST' && pathname === '/api/audit') {
+    const body = await readBody(req);
+    const { action, txId, blockHeight, commitment, message } = body;
+    if (!action || !txId || !blockHeight || !message) {
+      throw new Error('Missing required audit fields');
+    }
+    recordAudit({ action, txId, blockHeight, commitment, message });
+    json(res, 200, { success: true });
     return;
   }
 

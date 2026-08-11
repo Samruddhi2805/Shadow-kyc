@@ -74,4 +74,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ commitment }),
     }),
+
+  recordAudit: (record: {
+    action: string;
+    txId: string;
+    blockHeight: number;
+    commitment?: string;
+    message: string;
+  }) =>
+    request<{ success: boolean }>('/audit', {
+      method: 'POST',
+      body: JSON.stringify(record),
+    }),
 };
