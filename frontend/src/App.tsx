@@ -1,23 +1,21 @@
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { Buffer } from 'buffer'
-import { findDeployedContract } from '@midnight-ntwrk/midnight-js-contracts'
+import { findDeployedContract, type FoundContract } from '@midnight-ntwrk/midnight-js-contracts'
 import { FetchZkConfigProvider } from '@midnight-ntwrk/midnight-js-fetch-zk-config-provider'
 import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider'
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider'
 import { inMemoryPrivateStateProvider } from './in-memory-private-state-provider'
-import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id'
-import { Transaction } from '@midnight-ntwrk/midnight-js-protocol/ledger'
+import { setNetworkId, type NetworkId } from '@midnight-ntwrk/midnight-js-network-id'
+import { Transaction, type FinalizedTransaction, type TransactionId } from '@midnight-ntwrk/midnight-js-protocol/ledger'
 import { CompiledContract } from '@midnight-ntwrk/midnight-js-protocol/compact-js'
 import * as ShadowKyc from '../../contracts/managed/shadow-kyc/contract/index.js'
+import type { Contract as ShadowKycContract } from '../../contracts/managed/shadow-kyc/contract/index.js'
+import type { InitialAPI, ConnectedAPI } from '@midnight-ntwrk/dapp-connector-api'
+import type { WalletProvider, MidnightProvider, MidnightProviders, UnboundTransaction } from '@midnight-ntwrk/midnight-js-types'
 
 declare global {
   interface Window {
-    midnight?: Record<string, {
-      name: string;
-      apiVersion: string;
-      isEnabled: () => Promise<boolean>;
-      connect: (networkId: string) => Promise<any>;
-    }>;
+    midnight?: Record<string, InitialAPI>;
   }
 }
 
@@ -58,13 +56,18 @@ interface ShadowKycPrivateState {
   readonly localSecret: Uint8Array;
 }
 
-// Deterministically generate a 32-byte secret based on the user's wallet address
+// In-memory cache for cryptographically random secrets to preserve them for the session
+const inMemorySecrets = new Map<string, Uint8Array>();
+
+// Generate a cryptographically random 32-byte secret for Level 2 security requirement
 async function getDeterministicSecret(address: string): Promise<Uint8Array> {
   if (!address) return new Uint8Array(32);
-  const encoder = new TextEncoder();
-  const data = encoder.encode(`shadow-kyc:user-secret:${address}`);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  return new Uint8Array(hashBuffer);
+  let secret = inMemorySecrets.get(address);
+  if (!secret) {
+    secret = crypto.getRandomValues(new Uint8Array(32));
+    inMemorySecrets.set(address, secret);
+  }
+  return secret;
 }
 
 // Compute the exact SHA-256 hash (persistentHash) of the user's secret
@@ -92,14 +95,14 @@ interface Toast {
 }
 
 // Initialize Midnight client-side providers using the connected Lace Wallet configuration
-async function initializeClientProviders(connectedAPI: any) {
+async function initializeClientProviders(connectedAPI: ConnectedAPI): Promise<MidnightProviders<any, string, ShadowKycPrivateState>> {
   console.log('[Providers] Fetching wallet connector configuration...');
   const config = await connectedAPI.getConfiguration();
   console.log('[Providers] Wallet Config:', config);
   
   // Set the network ID dynamically from the connected wallet
   const networkId = config.networkId || import.meta.env.VITE_NETWORK || 'preprod';
-  setNetworkId(networkId as any);
+  setNetworkId(networkId as NetworkId);
 
   // Set the indexer and prover endpoints dynamically from the connected wallet
   const indexerUri = config.indexerUri;
@@ -117,17 +120,18 @@ async function initializeClientProviders(connectedAPI: any) {
   // Create in-memory private state provider to avoid plaintext localStorage leaks
   const privateStateProvider = inMemoryPrivateStateProvider<string, ShadowKycPrivateState>();
   
+  // Fetch shielded addresses asynchronously once
+  const shieldedAddresses = await connectedAPI.getShieldedAddresses();
+
   // Wallet provider wrapping the connectedAPI
-  const walletProvider = {
-    getCoinPublicKey: async () => {
-      const addrs = await connectedAPI.getShieldedAddresses();
-      return addrs.shieldedCoinPublicKey;
+  const walletProvider: WalletProvider = {
+    getCoinPublicKey: () => {
+      return shieldedAddresses.shieldedCoinPublicKey;
     },
-    getEncryptionPublicKey: async () => {
-      const addrs = await connectedAPI.getShieldedAddresses();
-      return addrs.shieldedEncryptionPublicKey;
+    getEncryptionPublicKey: () => {
+      return shieldedAddresses.shieldedEncryptionPublicKey;
     },
-    balanceTx: async (tx: any, _ttl?: Date) => {
+    balanceTx: async (tx: UnboundTransaction, _ttl?: Date): Promise<FinalizedTransaction> => {
       console.log('[Providers] Balancing transaction via connected wallet...', tx);
       const serializedTx = Buffer.from(tx.serialize()).toString('hex');
       const balanced = await connectedAPI.balanceUnsealedTransaction(serializedTx);
@@ -136,19 +140,19 @@ async function initializeClientProviders(connectedAPI: any) {
         'proof',
         'binding',
         Buffer.from(balanced.tx, 'hex'),
-      );
+      ) as FinalizedTransaction;
     }
   };
 
   // Midnight provider wrapping the connectedAPI
-  const midnightProvider = {
-    submitTx: async (tx: any) => {
+  const midnightProvider: MidnightProvider = {
+    submitTx: async (tx: FinalizedTransaction): Promise<TransactionId> => {
       console.log('[Providers] Submitting transaction via connected wallet...', tx);
       const serializedTx = Buffer.from(tx.serialize()).toString('hex');
       await connectedAPI.submitTransaction(serializedTx);
       const txIdentifiers = tx.identifiers();
       console.log('[Providers] Submitted Tx IDs:', txIdentifiers);
-      return txIdentifiers[0]; // return the transaction ID
+      return txIdentifiers[0] as TransactionId;
     }
   };
 
@@ -157,29 +161,32 @@ async function initializeClientProviders(connectedAPI: any) {
     zkConfigProvider: keyMaterialProvider,
     proofProvider: httpClientProofProvider(proverServerUri, keyMaterialProvider),
     publicDataProvider: indexerPublicDataProvider(indexerUri, indexerWsUri),
-    walletProvider: walletProvider as any,
-    midnightProvider: midnightProvider as any,
+    walletProvider,
+    midnightProvider,
   };
 }
 
 // Join the deployed Shadow-KYC contract using client-side providers
 async function joinContract(
-  connectedAPI: any,
+  connectedAPI: ConnectedAPI,
   address: string,
   contractAddress: string
-) {
+): Promise<{ deployed: FoundContract<ShadowKycContract<ShadowKycPrivateState>>; secret: Uint8Array }> {
   const providers = await initializeClientProviders(connectedAPI);
   providers.privateStateProvider.setContractAddress(contractAddress);
 
-  // Derive the user secret deterministically and initialize private state
+  // Derive the user secret and initialize private state
   const secret = await getDeterministicSecret(address);
   const initialPrivateState = { localSecret: secret };
   await providers.privateStateProvider.set('shadowKycPrivateState', initialPrivateState);
 
   // Re-create the CompiledContract structure with client witnesses
-  const compiledContract = CompiledContract.make('shadow-kyc', ShadowKyc.Contract).pipe(
+  const compiledContract = CompiledContract.make<ShadowKycContract<ShadowKycPrivateState>>(
+    'shadow-kyc',
+    ShadowKyc.Contract
+  ).pipe(
     CompiledContract.withWitnesses({
-      localSecret: (context: any) => {
+      localSecret: (context) => {
         const secret = context.privateState.localSecret;
         return [context.privateState, secret];
       }
@@ -187,9 +194,9 @@ async function joinContract(
   );
 
   console.log('[Contract] Attempting to join contract at address:', contractAddress);
-  const deployed = await findDeployedContract(providers, {
+  const deployed = await findDeployedContract<ShadowKycContract<ShadowKycPrivateState>>(providers, {
     contractAddress,
-    compiledContract: compiledContract as any,
+    compiledContract: compiledContract as CompiledContract.CompiledContract<ShadowKycContract<ShadowKycPrivateState>, ShadowKycPrivateState, never>,
     privateStateId: 'shadowKycPrivateState',
     initialPrivateState: initialPrivateState,
   });
@@ -217,8 +224,8 @@ function App() {
   const [availableWallets, setAvailableWallets] = useState<Array<{ id: string; name: string }>>([])
   const [isConnectingWallet, setIsConnectingWallet] = useState(false)
   const [txProgress, setTxProgress] = useState<TxModalProgressState | null>(null)
-  const [deployedContract, setDeployedContract] = useState<any>(null)
-  const connectedApiRef = useRef<any>(null)
+  const [deployedContract, setDeployedContract] = useState<FoundContract<ShadowKycContract<ShadowKycPrivateState>> | null>(null)
+  const connectedApiRef = useRef<ConnectedAPI | null>(null)
 
 
 
@@ -260,18 +267,23 @@ function App() {
 
       const defaultNet = import.meta.env.VITE_NETWORK || 'undeployed'
       const activeNet = (status?.network || defaultNet) === 'preview' ? 'preview' : (((status?.network || defaultNet) === 'preprod') ? 'preprod' : 'testnet')
-      let walletApi: any = null
+      let walletApi: ConnectedAPI | null = null
 
       // Multi-network & fallback connection attempt
       const netOptions = [activeNet, 'preview', 'testnet', 'preprod', 'undeployed']
       let lastErr: any = null
 
+      const legacyWallet = wallet as unknown as {
+        connect?: (networkId?: string) => Promise<ConnectedAPI>;
+        enable?: () => Promise<ConnectedAPI>;
+      };
+
       for (const netChoice of netOptions) {
         try {
-          if (typeof wallet.connect === 'function') {
+          if (typeof legacyWallet.connect === 'function') {
             walletApi = await Promise.race([
-              wallet.connect(netChoice),
-              new Promise((_, reject) => setTimeout(() => reject(new Error('Wallet request timed out — please check 1AM extension popup.')), 10000))
+              legacyWallet.connect(netChoice),
+              new Promise<ConnectedAPI>((_, reject) => setTimeout(() => reject(new Error('Wallet request timed out — please check 1AM extension popup.')), 10000))
             ])
             if (walletApi) break
           }
@@ -281,17 +293,17 @@ function App() {
         }
       }
 
-      if (!walletApi && typeof (wallet as any).connect === 'function') {
+      if (!walletApi && typeof legacyWallet.connect === 'function') {
         try {
-          walletApi = await (wallet as any).connect()
+          walletApi = await legacyWallet.connect()
         } catch (e) {
           lastErr = e
         }
       }
 
-      if (!walletApi && typeof (wallet as any).enable === 'function') {
+      if (!walletApi && typeof legacyWallet.enable === 'function') {
         try {
-          walletApi = await (wallet as any).enable()
+          walletApi = await legacyWallet.enable()
         } catch (e) {
           lastErr = e
         }
@@ -304,15 +316,21 @@ function App() {
       console.log(`[Wallet Connection] Connected API:`, walletApi)
 
       // Address resolution compatibility
-      let address = 'mn_wallet_account'
+      let address: unknown = 'mn_wallet_account'
       if (typeof walletApi.getUnshieldedAddress === 'function') {
         address = await walletApi.getUnshieldedAddress()
-      } else if (typeof walletApi.getAddresses === 'function') {
-        const addrs = await walletApi.getAddresses()
-        address = Array.isArray(addrs) ? addrs[0] : addrs
-      } else if (typeof walletApi.state === 'function') {
-        const st = await walletApi.state()
-        address = st?.unshielded?.address || st?.address || address
+      } else {
+        const legacyApi = walletApi as unknown as {
+          getAddresses?: () => Promise<unknown>;
+          state?: () => Promise<{ unshielded?: { address?: string }; address?: string }>;
+        };
+        if (typeof legacyApi.getAddresses === 'function') {
+          const addrs = await legacyApi.getAddresses()
+          address = Array.isArray(addrs) ? addrs[0] : addrs
+        } else if (typeof legacyApi.state === 'function') {
+          const st = await legacyApi.state()
+          address = st?.unshielded?.address || st?.address || address
+        }
       }
 
       // Balance resolution compatibility
@@ -321,29 +339,36 @@ function App() {
         if (typeof walletApi.getUnshieldedBalances === 'function') {
           const balances = await walletApi.getUnshieldedBalances()
           rawBalance = (balances['00'] ?? Object.values(balances)[0] ?? 10000n).toString()
-        } else if (typeof walletApi.getBalances === 'function') {
-          const balances = await walletApi.getBalances()
-          rawBalance = (balances['00'] ?? Object.values(balances)[0] ?? 10000n).toString()
+        } else {
+          const legacyApi = walletApi as unknown as {
+            getBalances?: () => Promise<Record<string, bigint>>;
+          };
+          if (typeof legacyApi.getBalances === 'function') {
+            const balances = await legacyApi.getBalances()
+            rawBalance = (balances['00'] ?? Object.values(balances)[0] ?? 10000n).toString()
+          }
         }
       } catch (balErr) {
         console.warn('[Wallet Connection] Balance query warning:', balErr)
       }
 
       // Safe address conversion helper
-      const extractAddressStr = (addrObj: any): string => {
+      const extractAddressStr = (addrObj: unknown): string => {
         if (!addrObj) return 'mn_wallet_account';
         if (typeof addrObj === 'string') return addrObj;
-        if (typeof addrObj === 'object') {
-          if (typeof addrObj.address === 'string') return addrObj.address;
-          if (typeof addrObj.bech32 === 'string') return addrObj.bech32;
-          if (typeof addrObj.bech32Address === 'string') return addrObj.bech32Address;
-          if (typeof addrObj.value === 'string') return addrObj.value;
-          if (typeof addrObj.toString === 'function') {
-            const s = addrObj.toString();
+        if (typeof addrObj === 'object' && addrObj !== null) {
+          const obj = addrObj as Record<string, unknown>;
+          if (typeof obj.unshieldedAddress === 'string') return obj.unshieldedAddress;
+          if (typeof obj.address === 'string') return obj.address;
+          if (typeof obj.bech32 === 'string') return obj.bech32;
+          if (typeof obj.bech32Address === 'string') return obj.bech32Address;
+          if (typeof obj.value === 'string') return obj.value;
+          if (typeof obj.toString === 'function') {
+            const s = obj.toString();
             if (s && s !== '[object Object]') return s;
           }
           try {
-            const serialized = JSON.stringify(addrObj);
+            const serialized = JSON.stringify(obj);
             const match = serialized.match(/"(mn_addr_[a-z0-9]+)"/i) || serialized.match(/"address"\s*:\s*"(.*?)"/);
             if (match && match[1]) return match[1];
           } catch {}
