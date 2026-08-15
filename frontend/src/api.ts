@@ -2,8 +2,7 @@
  * Thin typed client for the Shadow-KYC API server.
  *
  * In dev, Vite proxies /api to the API server (see vite.config.ts). In
- * production, the API server serves the built frontend from the same origin,
- * so relative /api paths work in both cases.
+ * production, requests are sent to the deployed Shadow-KYC API server.
  */
 import type {
   ApiError,
@@ -14,7 +13,7 @@ import type {
   TxResponse,
 } from './types';
 
-const BASE = '/api';
+const BASE = 'https://grow-focus-penalties-hon.trycloudflare.com/api';
 
 async function request<T>(path: string, init?: RequestInit & { timeout?: number }): Promise<T> {
   const timeoutMs = init?.timeout ?? (init?.method === 'POST' ? 120000 : 5000);
