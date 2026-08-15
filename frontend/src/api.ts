@@ -13,7 +13,7 @@ import type {
   TxResponse,
 } from './types';
 
-const BASE = 'https://grow-focus-penalties-hon.trycloudflare.com/api';
+const BASE = 'https://agreed-tan-automobiles-domain.trycloudflare.com/api';
 
 async function request<T>(path: string, init?: RequestInit & { timeout?: number }): Promise<T> {
   const timeoutMs = init?.timeout ?? (init?.method === 'POST' ? 120000 : 5000);
