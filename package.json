@@ -24,7 +24,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "tsx scripts/e2e-check.ts",
-    "frontend:dev": "npm --prefix frontend run dev",
+    "frontend:dev": "npm run api:fresh & npm --prefix frontend run dev",
     "frontend:build": "npm --prefix frontend run build"
   },
   "dependencies": {

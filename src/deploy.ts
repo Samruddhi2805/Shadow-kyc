@@ -166,12 +166,41 @@ async function main() {
   console.log('  ℹ  This may take several minutes depending on network size.');
   console.log('     RPC disconnection messages during sync are normal and can be safely ignored.\n');
   const syncStart = Date.now();
-  const syncInterval = setInterval(() => {
+
+  const sub = walletCtx.wallet.state().subscribe((state) => {
     const elapsed = Math.round((Date.now() - syncStart) / 1000);
-    process.stdout.write(`\r  ⏳ Still syncing... (${elapsed}s elapsed)   `);
-  }, 5000);
-  const state = await walletCtx.wallet.waitForSyncedState();
-  clearInterval(syncInterval);
+    
+    const shieldedApplied = state.shielded.progress.appliedIndex;
+    const shieldedTip = state.shielded.progress.highestRelevantWalletIndex;
+    const shieldedPct = shieldedTip > 0n ? ((Number(shieldedApplied) / Number(shieldedTip)) * 100).toFixed(1) : '0.0';
+    
+    const dustApplied = state.dust.progress.appliedIndex;
+    const dustTip = state.dust.progress.highestRelevantWalletIndex;
+    const dustPct = dustTip > 0n ? ((Number(dustApplied) / Number(dustTip)) * 100).toFixed(1) : '0.0';
+
+    const unshieldedSynced = state.unshielded.progress.isStrictlyComplete() ? 'Synced' : 'Syncing';
+    
+    process.stdout.write(
+      `\r  ⏳ Syncing... [Shielded: ${shieldedPct}% (${shieldedApplied}/${shieldedTip})] [Dust: ${dustPct}% (${dustApplied}/${dustTip})] [Unshielded: ${unshieldedSynced}] (${elapsed}s elapsed)   `
+    );
+  });
+
+  const SYNC_TIMEOUT_MS = 1_800_000; // 30 minutes
+  let state;
+  try {
+    const syncPromise = walletCtx.wallet.waitForSyncedState();
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error(`Sync timed out after ${SYNC_TIMEOUT_MS / 60000} minutes.`)), SYNC_TIMEOUT_MS)
+    );
+    state = await Promise.race([syncPromise, timeoutPromise]) as any;
+  } catch (err: any) {
+    sub.unsubscribe();
+    console.error(`\n❌ Sync error: ${err.message}`);
+    await walletCtx.wallet.stop();
+    process.exit(1);
+  }
+
+  sub.unsubscribe();
   process.stdout.write('\r  ✓ Synced with network.                                      \n');
 
   // Persist sync state now so a later deploy failure doesn't waste the sync work.
@@ -242,6 +271,21 @@ async function main() {
   );
   if (unregisteredUtxos.length > 0) {
     console.log(`  Registering ${unregisteredUtxos.length} NIGHT UTXOs for DUST generation...`);
+    
+    try {
+      console.log('  Waiting for sufficient generated DUST to cover registration fee...');
+      // Wait for generated DUST. We use a manual timeout race to ensure we handle timeouts clearly.
+      const waitPromise = walletCtx.wallet.waitForGeneratedDust(unregisteredUtxos, 300000000000001n);
+      const timeoutPromise = new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('Timeout waiting for generated DUST')), 600_000)
+      );
+      await Promise.race([waitPromise, timeoutPromise]);
+    } catch (err) {
+      console.error(`\n  ❌ Error waiting for generated DUST: ${err}`);
+      await walletCtx.wallet.stop();
+      process.exit(1);
+    }
+
     // The signDustRegistration callback (3rd arg) already produces a recipe
     // with N signatures matching N inputs. Do NOT call signRecipe again — that
     // would double-sign and the chain rejects with InputsSignaturesLengthMismatch

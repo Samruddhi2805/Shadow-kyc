@@ -36,12 +36,41 @@ async function main() {
     console.log('  ℹ  This may take several minutes depending on network size.');
     console.log('     RPC disconnection messages during sync are normal and can be safely ignored.\n');
     const syncStart = Date.now();
-    const syncInterval = setInterval(() => {
+
+    const sub = walletCtx.wallet.state().subscribe((state) => {
       const elapsed = Math.round((Date.now() - syncStart) / 1000);
-      process.stdout.write(`\r  ⏳ Still syncing... (${elapsed}s elapsed)   `);
-    }, 5000);
-    const state = await walletCtx.wallet.waitForSyncedState();
-    clearInterval(syncInterval);
+      
+      const shieldedApplied = state.shielded.progress.appliedIndex;
+      const shieldedTip = state.shielded.progress.highestRelevantWalletIndex;
+      const shieldedPct = shieldedTip > 0n ? ((Number(shieldedApplied) / Number(shieldedTip)) * 100).toFixed(1) : '0.0';
+      
+      const dustApplied = state.dust.progress.appliedIndex;
+      const dustTip = state.dust.progress.highestRelevantWalletIndex;
+      const dustPct = dustTip > 0n ? ((Number(dustApplied) / Number(dustTip)) * 100).toFixed(1) : '0.0';
+
+      const unshieldedSynced = state.unshielded.progress.isStrictlyComplete() ? 'Synced' : 'Syncing';
+      
+      process.stdout.write(
+        `\r  ⏳ Syncing... [Shielded: ${shieldedPct}% (${shieldedApplied}/${shieldedTip})] [Dust: ${dustPct}% (${dustApplied}/${dustTip})] [Unshielded: ${unshieldedSynced}] (${elapsed}s elapsed)   `
+      );
+    });
+
+    const SYNC_TIMEOUT_MS = 1_800_000; // 30 minutes
+    let state;
+    try {
+      const syncPromise = walletCtx.wallet.waitForSyncedState();
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error(`Sync timed out after ${SYNC_TIMEOUT_MS / 60000} minutes.`)), SYNC_TIMEOUT_MS)
+      );
+      state = await Promise.race([syncPromise, timeoutPromise]) as any;
+    } catch (err: any) {
+      sub.unsubscribe();
+      console.error(`\n❌ Sync error: ${err.message}`);
+      await walletCtx.wallet.stop();
+      process.exit(1);
+    }
+
+    sub.unsubscribe();
     process.stdout.write('\r  ✓ Synced with network.                                      \n');
 
     const address = walletCtx.unshieldedKeystore.getBech32Address();

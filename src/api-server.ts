@@ -28,6 +28,7 @@ import { levelPrivateStateProvider } from '@midnight-ntwrk/midnight-js-level-pri
 import { NodeZkConfigProvider } from '@midnight-ntwrk/midnight-js-node-zk-config-provider';
 import { CompiledContract } from '@midnight-ntwrk/midnight-js-protocol/compact-js';
 import { StateValue } from '@midnight-ntwrk/compact-runtime';
+import { UnshieldedAddress, MidnightBech32m } from '@midnight-ntwrk/wallet-sdk-address-format';
 import { resolveNetwork, getOrCreateSeed, getDeployment, type DeploymentRecord } from './network';
 import { createWallet, persistWalletState, unshieldedToken, type WalletContext } from './wallet';
 
@@ -302,7 +303,7 @@ async function main() {
 
   server.setTimeout(180000); // 3 minutes — ZK proofs can take 30-60s
 
-  server.listen(PORT, () => {
+  server.listen(PORT, '0.0.0.0', () => {
     console.log(`\n╔══════════════════════════════════════════════════════════════╗`);
     console.log(`║  API server ready                                          ║`);
     console.log(`║                                                            ║`);
@@ -467,6 +468,47 @@ async function handleRequest(
     return;
   }
 
+  // Proxy for the ZK proof server: /api/prover/* -> http://127.0.0.1:6300/*
+  if (pathname.startsWith('/api/prover/')) {
+    const targetPath = pathname.replace('/api/prover/', '');
+    console.log(`  🔄 Proxying proving request to proof-server: /${targetPath}`);
+    
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk) => chunks.push(chunk as Buffer));
+    req.on('end', () => {
+      const body = Buffer.concat(chunks);
+      
+      const proxyReq = http.request(
+        {
+          host: '127.0.0.1',
+          port: 6300,
+          path: `/${targetPath}`,
+          method: req.method,
+          headers: {
+            'Content-Type': req.headers['content-type'] || 'application/octet-stream',
+          },
+        },
+        (proxyRes) => {
+          res.writeHead(proxyRes.statusCode || 200, {
+            'Content-Type': proxyRes.headers['content-type'] || 'application/octet-stream',
+            'Access-Control-Allow-Origin': '*',
+          });
+          proxyRes.pipe(res);
+        }
+      );
+      
+      proxyReq.on('error', (proxyErr) => {
+        console.error('  ❌ Proof server proxy error:', proxyErr.message);
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: `Proof server unreachable: ${proxyErr.message}` }));
+      });
+      
+      proxyReq.write(body);
+      proxyReq.end();
+    });
+    return;
+  }
+
   try {
     await route(ctx, req, res, url, pathname, deployment);
   } catch (err) {
@@ -563,6 +605,75 @@ async function route(
       tNight: tNight.toString(),
       dust: dust.toString(),
     });
+    return;
+  }
+
+  // POST /api/faucet
+  if (req.method === 'POST' && pathname === '/api/faucet') {
+    const body = await readBody(req);
+    const targetAddress = String(body?.address ?? '').trim();
+    if (!targetAddress) {
+      throw new Error('Address is required');
+    }
+
+    if (deployed && walletCtx) {
+      console.log(`  ⚡ Transferring 20 tNIGHT from backend to ${targetAddress}...`);
+      try {
+        const decodedAddress = MidnightBech32m.parse(targetAddress).decode(UnshieldedAddress, networkConfig.networkId);
+        
+        const recipe = await withLock(async () => {
+          return await walletCtx.wallet.transferTransaction(
+            [
+              {
+                type: 'unshielded',
+                outputs: [
+                  {
+                    type: unshieldedToken().raw,
+                    receiverAddress: decodedAddress,
+                    amount: 20_000_000n, // 20 tNIGHT
+                  },
+                ],
+              },
+            ],
+            {
+              shieldedSecretKeys: walletCtx.shieldedSecretKeys,
+              dustSecretKey: walletCtx.dustSecretKey,
+            },
+            { ttl: new Date(Date.now() + 30 * 60 * 1000) },
+          );
+        });
+        const tx = await walletCtx.wallet.finalizeRecipe(recipe);
+        await walletCtx.wallet.submitTransaction(tx);
+        const txId = tx.identifiers()[0];
+        console.log(`  ✅ Faucet transfer success: ${txId}`);
+        json(res, 200, { success: true, txId });
+      } catch (e: any) {
+        console.error('  ❌ Faucet transfer failed! Diagnostic Details:');
+        console.error('Constructor:', e?.constructor?.name);
+        console.error('Name:', e?.name);
+        console.error('Message:', e?.message);
+        console.error('Code:', e?.code);
+        console.error('Reason:', e?.reason);
+        console.error('Cause:', e?.cause);
+        console.error('Stack:', e?.stack);
+        console.error('Full Error Object:', e);
+
+        const details = [];
+        if (e?.name && e.name !== 'Error') details.push(`Name: ${e.name}`);
+        if (e?.message) details.push(`Message: ${e.message}`);
+        if (e?.code) details.push(`Code: ${e.code}`);
+        if (e?.reason) details.push(`Reason: ${e.reason}`);
+        if (e?.cause) {
+          const causeMsg = e.cause?.message || e.cause?.reason || String(e.cause);
+          details.push(`Cause: ${causeMsg}`);
+        }
+        const fullErrStr = details.join(' | ') || String(e);
+        json(res, 500, { error: `Faucet transfer failed: ${fullErrStr}` });
+      }
+    } else {
+      console.log(`  ⚡ Faucet simulation for ${targetAddress}`);
+      json(res, 200, { success: true, txId: 'simulated-faucet-tx' });
+    }
     return;
   }
 

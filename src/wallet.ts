@@ -109,11 +109,18 @@ export async function createWallet(opts: CreateWalletOptions): Promise<WalletCon
     indexerClientConnection: {
       indexerHttpUrl: opts.networkConfig.indexer,
       indexerWsUrl: opts.networkConfig.indexerWS,
+      bufferSize: 1000000,
+      resumeThreshold: 900000,
     },
     provingServerUrl: new URL(opts.networkConfig.proofServer),
     relayURL: new URL(opts.networkConfig.node.replace(/^http/, 'ws')),
     txHistoryStorage: new NoOpTransactionHistoryStorage(),
     costParameters: { additionalFeeOverhead: 300_000_000_000_000n, feeBlocksMargin: 5 },
+    batchUpdates: {
+      size: 5000,
+      spacing: 0,
+      timeout: 10,
+    },
   };
 
   const wallet = await WalletFacade.init({

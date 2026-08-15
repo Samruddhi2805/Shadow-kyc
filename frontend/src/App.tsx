@@ -1,17 +1,11 @@
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { Buffer } from 'buffer'
 import { findDeployedContract, type FoundContract } from '@midnight-ntwrk/midnight-js-contracts'
-import { FetchZkConfigProvider } from '@midnight-ntwrk/midnight-js-fetch-zk-config-provider'
-import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider'
-import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider'
-import { inMemoryPrivateStateProvider } from './in-memory-private-state-provider'
-import { setNetworkId, type NetworkId } from '@midnight-ntwrk/midnight-js-network-id'
-import { Transaction, type FinalizedTransaction, type TransactionId } from '@midnight-ntwrk/midnight-js-protocol/ledger'
 import { CompiledContract } from '@midnight-ntwrk/midnight-js-protocol/compact-js'
 import * as ShadowKyc from '../../contracts/managed/shadow-kyc/contract/index.js'
 import type { Contract as ShadowKycContract } from '../../contracts/managed/shadow-kyc/contract/index.js'
 import type { InitialAPI, ConnectedAPI } from '@midnight-ntwrk/dapp-connector-api'
-import type { WalletProvider, MidnightProvider, MidnightProviders, UnboundTransaction } from '@midnight-ntwrk/midnight-js-types'
+import { initializeClientProviders, type ShadowKycPrivateState } from './providers'
 
 declare global {
   interface Window {
@@ -52,9 +46,7 @@ function formatNetworkName(net?: string): string {
   return net
 }
 
-interface ShadowKycPrivateState {
-  readonly localSecret: Uint8Array;
-}
+// ShadowKycPrivateState is imported from providers.ts
 
 // In-memory cache for cryptographically random secrets to preserve them for the session
 const inMemorySecrets = new Map<string, Uint8Array>();
@@ -94,77 +86,7 @@ interface Toast {
   text: string
 }
 
-// Initialize Midnight client-side providers using the connected Lace Wallet configuration
-async function initializeClientProviders(connectedAPI: ConnectedAPI): Promise<MidnightProviders<any, string, ShadowKycPrivateState>> {
-  console.log('[Providers] Fetching wallet connector configuration...');
-  const config = await connectedAPI.getConfiguration();
-  console.log('[Providers] Wallet Config:', config);
-  
-  // Set the network ID dynamically from the connected wallet
-  const networkId = config.networkId || import.meta.env.VITE_NETWORK || 'preprod';
-  setNetworkId(networkId as NetworkId);
-
-  // Set the indexer and prover endpoints dynamically from the connected wallet
-  const indexerUri = config.indexerUri;
-  const indexerWsUri = config.indexerWsUri;
-  const proverServerUri = config.proverServerUri || 'http://localhost:6300';
-
-  console.log(`[Providers] Target Network: ${networkId}`);
-  console.log(`[Providers] Indexer URI:    ${indexerUri}`);
-  console.log(`[Providers] Prover URI:     ${proverServerUri}`);
-
-  // Fetch ZK configs statically from the DApp public directory
-  const zkConfigPath = window.location.origin;
-  const keyMaterialProvider = new FetchZkConfigProvider(zkConfigPath, fetch.bind(window));
-  
-  // Create in-memory private state provider to avoid plaintext localStorage leaks
-  const privateStateProvider = inMemoryPrivateStateProvider<string, ShadowKycPrivateState>();
-  
-  // Fetch shielded addresses asynchronously once
-  const shieldedAddresses = await connectedAPI.getShieldedAddresses();
-
-  // Wallet provider wrapping the connectedAPI
-  const walletProvider: WalletProvider = {
-    getCoinPublicKey: () => {
-      return shieldedAddresses.shieldedCoinPublicKey;
-    },
-    getEncryptionPublicKey: () => {
-      return shieldedAddresses.shieldedEncryptionPublicKey;
-    },
-    balanceTx: async (tx: UnboundTransaction, _ttl?: Date): Promise<FinalizedTransaction> => {
-      console.log('[Providers] Balancing transaction via connected wallet...', tx);
-      const serializedTx = Buffer.from(tx.serialize()).toString('hex');
-      const balanced = await connectedAPI.balanceUnsealedTransaction(serializedTx);
-      return Transaction.deserialize(
-        'signature',
-        'proof',
-        'binding',
-        Buffer.from(balanced.tx, 'hex'),
-      ) as FinalizedTransaction;
-    }
-  };
-
-  // Midnight provider wrapping the connectedAPI
-  const midnightProvider: MidnightProvider = {
-    submitTx: async (tx: FinalizedTransaction): Promise<TransactionId> => {
-      console.log('[Providers] Submitting transaction via connected wallet...', tx);
-      const serializedTx = Buffer.from(tx.serialize()).toString('hex');
-      await connectedAPI.submitTransaction(serializedTx);
-      const txIdentifiers = tx.identifiers();
-      console.log('[Providers] Submitted Tx IDs:', txIdentifiers);
-      return txIdentifiers[0] as TransactionId;
-    }
-  };
-
-  return {
-    privateStateProvider,
-    zkConfigProvider: keyMaterialProvider,
-    proofProvider: httpClientProofProvider(proverServerUri, keyMaterialProvider),
-    publicDataProvider: indexerPublicDataProvider(indexerUri, indexerWsUri),
-    walletProvider,
-    midnightProvider,
-  };
-}
+// initializeClientProviders is imported from providers.ts
 
 // Join the deployed Shadow-KYC contract using client-side providers
 async function joinContract(
@@ -204,6 +126,23 @@ async function joinContract(
   return { deployed, secret };
 }
 
+// Module-scoped connection cache to survive React StrictMode remounts
+let globalConnectingPromise: Promise<ConnectedAPI> | null = null;
+let globalConnectedAPI: ConnectedAPI | null = null;
+let globalConnectedWallet: ConnectedWalletInfo | null = null;
+let globalDeployedContract: FoundContract<ShadowKycContract<ShadowKycPrivateState>> | null = null;
+let globalContractInitFailed = false;
+
+async function validateConnectedAPI(api: ConnectedAPI): Promise<boolean> {
+  try {
+    await api.getUnshieldedAddress();
+    return true;
+  } catch (err) {
+    console.warn('[Lace Connect] Cached ConnectedAPI is stale:', err);
+    return false;
+  }
+}
+
 // ─── Main Component ────────────────────────────────────────────────────────────
 
 function App() {
@@ -225,7 +164,9 @@ function App() {
   const [isConnectingWallet, setIsConnectingWallet] = useState(false)
   const [txProgress, setTxProgress] = useState<TxModalProgressState | null>(null)
   const [deployedContract, setDeployedContract] = useState<FoundContract<ShadowKycContract<ShadowKycPrivateState>> | null>(null)
+  const [contractInitFailed, setContractInitFailed] = useState<boolean>(globalContractInitFailed)
   const connectedApiRef = useRef<ConnectedAPI | null>(null)
+  const connectingRef = useRef(false)
 
 
 
@@ -240,221 +181,307 @@ function App() {
       return
     }
     const keys = Object.keys(window.midnight)
-    const list = keys.map((id) => ({
-      id,
-      name: window.midnight![id]?.name || id,
-    }))
-    setAvailableWallets(list)
+    
+    // Only update availableWallets if the list of keys actually changed
+    setAvailableWallets((prev) => {
+      const prevKeys = prev.map(w => w.id);
+      const hasChanged = keys.length !== prevKeys.length || keys.some(k => !prevKeys.includes(k));
+      if (!hasChanged) return prev;
+      return keys.map((id) => ({
+        id,
+        name: window.midnight![id]?.name || id,
+      }));
+    });
+  }, [])
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      console.log('=== Midnight Wallet Detection Diagnostics ===');
+      console.log('window.midnight exists:', !!window.midnight);
+      if (window.midnight) {
+        const keys = Object.keys(window.midnight);
+        console.log('Keys under window.midnight:', keys);
+        keys.forEach(key => {
+          const apiObj = window.midnight![key];
+          console.log(`Wallet Key: "${key}"`, {
+            name: apiObj?.name,
+            apiVersion: apiObj?.apiVersion,
+            rdns: apiObj?.rdns,
+            iconExists: !!apiObj?.icon,
+            properties: Object.keys(apiObj || {}),
+            isLace: key.toLowerCase().includes('lace') || apiObj?.name?.toLowerCase().includes('lace')
+          });
+        });
+      } else {
+        console.log('window.midnight is undefined/null');
+      }
+      console.log('============================================');
+    }
   }, [])
 
   useEffect(() => {
     scanWallets()
     const id = window.setInterval(scanWallets, 1500)
     return () => window.clearInterval(id)
-  }, [scanWallets])
+  }, [])
 
-  const connectWallet = useCallback(async (walletId: string) => {
-    if (typeof window === 'undefined' || !window.midnight || !window.midnight[walletId]) {
-      showToast('error', 'Selected wallet extension is not detected in your browser.')
-      return
+  const connectWallet = useCallback(async (walletId: string, isAutoConnect = false) => {
+    globalContractInitFailed = false;
+    setContractInitFailed(false);
+    if (connectingRef.current) {
+      console.log('[Wallet Connect] Connection already in progress, ignoring duplicate call.');
+      return;
     }
-    setIsConnectingWallet(true)
-    showToast('info', `Connecting to ${walletId}... Please check your wallet extension popup to approve access if prompted.`)
+
+    if (typeof window === 'undefined' || !window.midnight || !window.midnight[walletId]) {
+      if (!isAutoConnect) {
+        showToast('error', 'Selected wallet extension is not detected in your browser.');
+      }
+      return;
+    }
+
+    // Verify that the selected wallet is actually Lace (or has 'lace' in ID/name)
+    const walletObj = window.midnight[walletId];
+    const isLace = walletId.toLowerCase().includes('lace') || (walletObj?.name || '').toLowerCase().includes('lace');
+    if (!isLace) {
+      if (!isAutoConnect) {
+        showToast('error', 'Only Lace Wallet is supported for this application.');
+      }
+      return;
+    }
+
+    // If we already have a fully established and active connection, validate it.
+    if (globalConnectedAPI && globalConnectedWallet && globalConnectedWallet.id === walletId) {
+      console.log('[Lace Connect] Validating cached ConnectedAPI...');
+      const isValid = await validateConnectedAPI(globalConnectedAPI);
+      if (isValid) {
+        console.log('[Lace Connect] Restoring existing active connection from global cache.');
+        setConnectedWallet(globalConnectedWallet);
+        if (globalDeployedContract) setDeployedContract(globalDeployedContract);
+        setContractInitFailed(globalContractInitFailed);
+        connectedApiRef.current = globalConnectedAPI;
+        setShowWalletModal(false);
+        if (!isAutoConnect) {
+          showToast('success', `Successfully connected to ${walletObj.name || 'Lace'}!`);
+        }
+        return;
+      } else {
+        console.warn('[Lace Connect] Cached ConnectedAPI is stale. Clearing cache and reconnecting...');
+        globalConnectedAPI = null;
+        globalConnectedWallet = null;
+        globalDeployedContract = null;
+        globalConnectingPromise = null;
+        connectedApiRef.current = null;
+        setConnectedWallet(null);
+        setDeployedContract(null);
+        setContractInitFailed(false);
+      }
+    }
+
+    connectingRef.current = true;
+    setIsConnectingWallet(true);
+    if (!isAutoConnect) {
+      showToast('info', `Connecting to ${walletObj.name || 'Lace'}... Please check your wallet extension popup.`);
+    }
 
     try {
-      const wallet = window.midnight[walletId]
-      console.log(`[Wallet Connection] Connecting to ${walletId}...`, wallet)
+      const defaultNet = import.meta.env.VITE_NETWORK || 'preprod';
+      const targetNetwork = (status?.network || defaultNet) === 'preview' ? 'preview' : (((status?.network || defaultNet) === 'preprod') ? 'preprod' : 'testnet');
+      
+      let walletApi: ConnectedAPI | null = null;
+      const netOptions = [targetNetwork, 'preview', 'testnet', 'preprod', 'undeployed'];
+      let lastErr: any = null;
 
-      const defaultNet = import.meta.env.VITE_NETWORK || 'undeployed'
-      const activeNet = (status?.network || defaultNet) === 'preview' ? 'preview' : (((status?.network || defaultNet) === 'preprod') ? 'preprod' : 'testnet')
-      let walletApi: ConnectedAPI | null = null
-
-      // Multi-network & fallback connection attempt
-      const netOptions = [activeNet, 'preview', 'testnet', 'preprod', 'undeployed']
-      let lastErr: any = null
-
-      const legacyWallet = wallet as unknown as {
+      const legacyWallet = walletObj as unknown as {
         connect?: (networkId?: string) => Promise<ConnectedAPI>;
         enable?: () => Promise<ConnectedAPI>;
       };
 
-      for (const netChoice of netOptions) {
-        try {
-          if (typeof legacyWallet.connect === 'function') {
-            walletApi = await Promise.race([
-              legacyWallet.connect(netChoice),
-              new Promise<ConnectedAPI>((_, reject) => setTimeout(() => reject(new Error('Wallet request timed out — please check 1AM extension popup.')), 10000))
-            ])
-            if (walletApi) break
+      if (globalConnectingPromise) {
+        console.log('[Lace Connect] Reusing existing pending connection promise...');
+        walletApi = await globalConnectingPromise;
+      } else {
+        // Multi-network connection attempt loop
+        for (const netChoice of netOptions) {
+          try {
+            if (typeof legacyWallet.connect === 'function') {
+              console.log(`[Lace Connect] Trying connect('${netChoice}')...`);
+              globalConnectingPromise = legacyWallet.connect(netChoice);
+              walletApi = await globalConnectingPromise;
+              if (walletApi) break;
+            }
+          } catch (e) {
+            lastErr = e;
+            globalConnectingPromise = null;
+            console.warn(`[Lace Connect] Network ${netChoice} connect failed:`, e);
           }
-        } catch (e) {
-          lastErr = e
-          console.warn(`[Wallet Connection] ${netChoice} attempt failed:`, e)
         }
+        globalConnectingPromise = null;
       }
 
       if (!walletApi && typeof legacyWallet.connect === 'function') {
         try {
-          walletApi = await legacyWallet.connect()
+          console.log('[Lace Connect] Trying parameter-less connect()...');
+          walletApi = await legacyWallet.connect();
         } catch (e) {
-          lastErr = e
+          lastErr = e;
         }
       }
 
       if (!walletApi && typeof legacyWallet.enable === 'function') {
         try {
-          walletApi = await legacyWallet.enable()
+          console.log('[Lace Connect] Trying legacy enable()...');
+          walletApi = await legacyWallet.enable();
         } catch (e) {
-          lastErr = e
+          lastErr = e;
         }
       }
 
       if (!walletApi) {
-        throw lastErr || new Error(`Unable to connect to ${wallet.name || walletId}. Make sure your wallet is unlocked and set to Preview Testnet.`)
+        throw lastErr || new Error(`Unable to connect to ${walletObj.name || walletId}. Make sure your wallet is unlocked and set to Midnight Preprod.`);
       }
 
-      console.log(`[Wallet Connection] Connected API:`, walletApi)
+      console.log(`[Wallet Connection] Connected API:`, walletApi);
+      globalConnectedAPI = walletApi;
+      connectedApiRef.current = walletApi;
 
-      // Address resolution compatibility
-      let address: unknown = 'mn_wallet_account'
-      if (typeof walletApi.getUnshieldedAddress === 'function') {
-        address = await walletApi.getUnshieldedAddress()
-      } else {
-        const legacyApi = walletApi as unknown as {
-          getAddresses?: () => Promise<unknown>;
-          state?: () => Promise<{ unshielded?: { address?: string }; address?: string }>;
-        };
-        if (typeof legacyApi.getAddresses === 'function') {
-          const addrs = await legacyApi.getAddresses()
-          address = Array.isArray(addrs) ? addrs[0] : addrs
-        } else if (typeof legacyApi.state === 'function') {
-          const st = await legacyApi.state()
-          address = st?.unshielded?.address || st?.address || address
-        }
-      }
-
-      // Balance resolution compatibility
-      let rawBalance = '10000'
+      // Address resolution based strictly on API typings
+      let finalAddress = '';
       try {
-        if (typeof walletApi.getUnshieldedBalances === 'function') {
-          const balances = await walletApi.getUnshieldedBalances()
-          rawBalance = (balances['00'] ?? Object.values(balances)[0] ?? 10000n).toString()
-        } else {
-          const legacyApi = walletApi as unknown as {
-            getBalances?: () => Promise<Record<string, bigint>>;
-          };
-          if (typeof legacyApi.getBalances === 'function') {
-            const balances = await legacyApi.getBalances()
-            rawBalance = (balances['00'] ?? Object.values(balances)[0] ?? 10000n).toString()
-          }
-        }
-      } catch (balErr) {
-        console.warn('[Wallet Connection] Balance query warning:', balErr)
+        const addressObj = await walletApi.getUnshieldedAddress();
+        finalAddress = addressObj.unshieldedAddress;
+      } catch (addrErr: any) {
+        console.error('[Wallet Connection Debug] getUnshieldedAddress failed:', addrErr);
+        throw addrErr;
       }
 
-      // Safe address conversion helper
-      const extractAddressStr = (addrObj: unknown): string => {
-        if (!addrObj) return 'mn_wallet_account';
-        if (typeof addrObj === 'string') return addrObj;
-        if (typeof addrObj === 'object' && addrObj !== null) {
-          const obj = addrObj as Record<string, unknown>;
-          if (typeof obj.unshieldedAddress === 'string') return obj.unshieldedAddress;
-          if (typeof obj.address === 'string') return obj.address;
-          if (typeof obj.bech32 === 'string') return obj.bech32;
-          if (typeof obj.bech32Address === 'string') return obj.bech32Address;
-          if (typeof obj.value === 'string') return obj.value;
-          if (typeof obj.toString === 'function') {
-            const s = obj.toString();
-            if (s && s !== '[object Object]') return s;
-          }
-          try {
-            const serialized = JSON.stringify(obj);
-            const match = serialized.match(/"(mn_addr_[a-z0-9]+)"/i) || serialized.match(/"address"\s*:\s*"(.*?)"/);
-            if (match && match[1]) return match[1];
-          } catch {}
-        }
-        return String(addrObj);
-      };
+      // Balance resolution
+      let rawBalance = '0';
+      try {
+        const balances = await walletApi.getUnshieldedBalances();
+        rawBalance = (balances['00'] ?? Object.values(balances)[0] ?? 0n).toString();
+      } catch (balErr) {
+        console.warn('[Wallet Connection Debug] Balance query warning:', balErr);
+      }
 
-      const finalAddress = extractAddressStr(address);
-
-      const walletObj: ConnectedWalletInfo = {
+      const connectedWalletObj: ConnectedWalletInfo = {
         id: walletId,
-        name: wallet.name || walletId,
+        name: walletObj.name || 'Lace',
         address: finalAddress,
         tNight: rawBalance,
-        dust: '100',
-        network: (status?.network || defaultNet) === 'preview' ? 'Midnight Preview' : 'Midnight Network',
+        dust: '0',
+        network: targetNetwork === 'preprod' ? 'Midnight Preprod' : (targetNetwork === 'preview' ? 'Midnight Preview' : targetNetwork),
         isWebWallet: false,
-      }
+      };
 
-      connectedApiRef.current = walletApi;
+      globalConnectedWallet = connectedWalletObj;
 
       // Join the deployed smart contract on Preprod
       const contractAddress = status?.contractAddress || import.meta.env.VITE_CONTRACT_ADDRESS;
       if (contractAddress && contractAddress !== '') {
         try {
-          showToast('info', 'Connecting to Shadow-KYC smart contract and deriving secret...');
           const result = await joinContract(walletApi, finalAddress, contractAddress);
           console.log('[Contract Join] Successfully loaded contract client:', result.deployed);
+          globalDeployedContract = result.deployed;
           setDeployedContract(result.deployed);
+          globalContractInitFailed = false;
+          setContractInitFailed(false);
         } catch (contractErr: any) {
           console.error('[Contract Join Error]', contractErr);
-          showToast('error', `Contract connection failed: ${contractErr.message || contractErr}. Running in offline/read-only mode.`);
+          globalContractInitFailed = true;
+          setContractInitFailed(true);
+          throw contractErr;
         }
+      } else {
+        globalContractInitFailed = false;
+        setContractInitFailed(false);
       }
 
-      localStorage.setItem('connectedWalletId', walletId)
-      setConnectedWallet(walletObj)
-      setShowWalletModal(false)
-      setShowWalletSuccessPop(walletObj)
-      showToast('success', `Successfully connected to ${wallet.name || walletId}!`)
+      localStorage.setItem('connectedWalletId', walletId);
+      setConnectedWallet(connectedWalletObj);
+      setShowWalletModal(false);
+      setShowWalletSuccessPop(connectedWalletObj);
+      if (!isAutoConnect) {
+        showToast('success', `Successfully connected to ${walletObj.name || 'Lace'}!`);
+      }
     } catch (err: any) {
-      console.error('[Wallet Connection Error]', err)
-      showToast('error', `Connection failed: ${err.message || err}`)
+      console.error('[Wallet Connection Error]', err);
+      if (!isAutoConnect) {
+        const details = err?.message || err?.reason || String(err);
+        const errMsg = details.toLowerCase();
+        let displayMsg = details;
+        if (errMsg.includes('locked')) {
+          displayMsg = 'Please unlock Lace, then click Connect Wallet.';
+        } else if (err?.code === 'Rejected' || errMsg.includes('reject') || err?.code === 'PermissionRejected') {
+          displayMsg = 'Wallet connection rejected.';
+        } else if (errMsg.includes('network')) {
+          displayMsg = 'Please switch Lace to Midnight Preprod.';
+        }
+        showToast('error', displayMsg);
+      }
     } finally {
-      setIsConnectingWallet(false)
+      connectingRef.current = false;
+      setIsConnectingWallet(false);
     }
-  }, [status, showToast])
+  }, [status, showToast]);
 
-  const autoConnectedRef = useRef(false)
+  const autoConnectedRef = useRef(false);
 
   useEffect(() => {
-    if (availableWallets.length > 0 && !connectedWallet && !autoConnectedRef.current) {
-      const savedId = localStorage.getItem('connectedWalletId')
-      if (savedId && availableWallets.some(w => w.id === savedId)) {
-        autoConnectedRef.current = true
-        void connectWallet(savedId)
+    const laceWallet = availableWallets.find(w => w.id.toLowerCase().includes('lace') || w.name.toLowerCase().includes('lace'));
+    if (laceWallet && !connectedWallet && !autoConnectedRef.current) {
+      const savedId = localStorage.getItem('connectedWalletId');
+      if (savedId && (savedId.toLowerCase().includes('lace') || savedId === laceWallet.id)) {
+        autoConnectedRef.current = true;
+        void connectWallet(laceWallet.id, true);
       }
     }
   }, [availableWallets, connectedWallet, connectWallet])
 
-  const connectWebWallet = useCallback(() => {
-    setIsConnectingWallet(true)
-    setTimeout(() => {
-      const randomHexAdd = 'mn_1' + Array.from({ length: 36 }, () => Math.floor(Math.random() * 16).toString(16)).join('')
-      const defaultNet = import.meta.env.VITE_NETWORK || 'undeployed'
-      const walletObj: ConnectedWalletInfo = {
-        id: 'web-wallet',
-        name: 'Midnight Devnet Web Wallet',
-        address: randomHexAdd,
-        tNight: '10000',
-        dust: '500',
-        network: (status?.network || defaultNet) === 'preview' ? 'Midnight Preview' : 'Midnight Local Devnet',
-        isWebWallet: true,
+  const [isRequestingFaucet, setIsRequestingFaucet] = useState(false);
+
+  const handleFaucetRequest = useCallback(async () => {
+    if (!connectedWallet) return;
+    setIsRequestingFaucet(true);
+    showToast('info', 'Requesting 20 tNIGHT from local backend faucet...');
+    try {
+      const response = await fetch('/api/faucet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: connectedWallet.address }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Faucet request failed');
       }
-      setConnectedWallet(walletObj)
-      setShowWalletModal(false)
-      setIsConnectingWallet(false)
-      setShowWalletSuccessPop(walletObj)
-      showToast('success', 'Connected to Midnight Web Wallet!')
-    }, 400)
-  }, [status, showToast])
+      showToast('success', `Faucet transfer successful! Tx ID: ${data.txId?.slice(0, 10)}... Please wait 5-10 seconds for block inclusion.`);
+      
+      // Wait 8 seconds for block inclusion and refresh balance
+      await new Promise(r => setTimeout(r, 8000));
+      if (connectedApiRef.current) {
+        const balances = await connectedApiRef.current.getUnshieldedBalances();
+        const rawBalance = (balances['00'] ?? Object.values(balances)[0] ?? 0n).toString();
+        setConnectedWallet(prev => prev ? { ...prev, tNight: rawBalance } : null);
+        console.log('[Faucet Request] Updated Lace wallet balance:', rawBalance);
+      }
+    } catch (err: any) {
+      showToast('error', err.message || String(err));
+    } finally {
+      setIsRequestingFaucet(false);
+    }
+  }, [connectedWallet, showToast]);
 
   const disconnectWallet = useCallback(() => {
+    globalConnectedAPI = null;
+    globalConnectedWallet = null;
+    globalDeployedContract = null;
+    globalConnectingPromise = null;
+    globalContractInitFailed = false;
+
     setConnectedWallet(null)
     setShowWalletSuccessPop(null)
     setDeployedContract(null)
+    setContractInitFailed(false)
     connectedApiRef.current = null
     localStorage.removeItem('connectedWalletId')
     showToast('info', 'Wallet disconnected')
@@ -491,7 +518,7 @@ function App() {
     void refresh()
     const id = window.setInterval(() => void refresh(), 8000)
     return () => window.clearInterval(id)
-  }, [refresh])
+  }, [])
 
   const runTxWithModal = useCallback(
     async (
@@ -538,9 +565,39 @@ function App() {
         showToast('success', `${tx.message} (tx ${shortHex(tx.txId, 8, 6)})`)
         await refresh()
       } catch (err: any) {
-        const errMsg = err instanceof Error ? err.message : `${title} failed`
+        console.error('[TX ERROR DETAILED]', err);
+        console.error('Constructor:', err?.constructor?.name);
+        console.error('Name:', err?.name);
+        console.error('Message:', err?.message);
+        console.error('Code:', err?.code);
+        console.error('Reason:', err?.reason);
+        console.error('Cause:', err?.cause);
+        console.error('Stack:', err?.stack);
+
+        const details = [];
+        if (err?.name && err.name !== 'Error') details.push(`Name: ${err.name}`);
+        if (err?.message) details.push(`Message: ${err.message}`);
+        if (err?.code) details.push(`Code: ${err.code}`);
+        if (err?.reason) details.push(`Reason: ${err.reason}`);
+        if (err?.cause) {
+          const causeMsg = err.cause?.message || err.cause?.reason || String(err.cause);
+          details.push(`Cause: ${causeMsg}`);
+        }
+        
+        let errMsg = details.join(' | ') || String(err);
+        
+        // Handle dust error with a friendly explanation
+        const isDustError = 
+          /could not balance dust/i.test(errMsg) || 
+          /Wallet\.InsufficientFunds/i.test(errMsg) || 
+          (err?.cause?.failure?.message && /could not balance dust/i.test(err.cause.failure.message));
+          
+        if (isDustError) {
+          errMsg = "Insufficient DUST balance in Lace Wallet! DUST is required to cover ZK transaction fees. Please open your Lace Wallet extension, select the Midnight tab, click 'Generate DUST' (or register your NIGHT tokens), and wait a few blocks for DUST generation.";
+        }
+        
         // Contract assertion errors (409) are warnings, not fatal errors
-        const isWarning = errMsg.includes('Please wait') || errMsg.includes('already') || errMsg.includes('Only the') || errMsg.includes('does not match') || errMsg.includes('not been approved') || errMsg.includes('been revoked') || errMsg.includes('No pending')
+        const isWarning = isDustError || errMsg.includes('Please wait') || errMsg.includes('already') || errMsg.includes('Only the') || errMsg.includes('does not match') || errMsg.includes('not been approved') || errMsg.includes('been revoked') || errMsg.includes('No pending')
         setTxProgress((prev) =>
           prev ? { ...prev, step: 'error', error: errMsg } : null
         )
@@ -574,12 +631,60 @@ function App() {
       const realCommitment = await computeRealCommitment(secret);
       
       void runTxWithModal('issueCredential', 'Request KYC Credential (Lace Wallet ZK)', realCommitment, async () => {
-        console.log('[Lace ZK] Calling issueCredential circuit...');
+        console.log('[TX] issueCredential started');
+        console.log('[Lace ZK] Fetching real-time balance before transaction...');
+        if (!connectedApiRef.current) {
+          throw new Error(
+            'Lace wallet is not connected. Please reconnect Lace and try again.'
+          );
+        }
+
+        let currentBalance: bigint;
+
+        try {
+          const balances = await connectedApiRef.current.getUnshieldedBalances();
+
+          currentBalance =
+            balances['00'] ?? Object.values(balances)[0] ?? 0n;
+
+          console.log(
+            '[Lace ZK] Real-time balance (micro-tNIGHT):',
+            currentBalance.toString()
+          );
+
+          setConnectedWallet(prev =>
+            prev
+              ? { ...prev, tNight: currentBalance.toString() }
+              : null
+          );
+        } catch (err) {
+          console.error(
+            '[Lace ZK] Wallet API balance lookup failed:',
+            err
+          );
+
+          throw new Error(
+            'Lace wallet connection expired. Please disconnect and reconnect Lace, then try again.',
+            { cause: err }
+          );
+        }
+
+        if (currentBalance < 2_000_000n) {
+          throw new Error(
+            'Insufficient tNIGHT balance. At least 2 tNIGHT is required.'
+          );
+        }
+
+        console.log('[TX] contract call created. Executing issueCredential circuit...');
         setTxProgress((prev: any) => prev ? { ...prev, step: 'proving', message: 'Generating local ZK proof...' } : null);
         
-        // Execute the circuit client-side!
+        // Execute the circuit client-side (this triggers ZK proof, balancing, signing and submission)
         const tx = await deployedContract.callTx.issueCredential();
         
+        console.log('[TX] proof completed');
+        console.log('[TX] transaction object created');
+        console.log('[TX] submitTransaction completed');
+
         setTxProgress((prev: any) => prev ? { ...prev, step: 'signing', message: 'Submitting transaction via Lace Wallet...', txId: tx.public.txId, blockHeight: tx.public.blockHeight } : null);
         
         // Log transaction to backend audit server
@@ -622,12 +727,60 @@ function App() {
     (commitment: string) => {
       if (deployedContract && connectedWallet && !connectedWallet.isWebWallet) {
         void runTxWithModal('proveEligibility', 'ZK Prove Eligibility (Lace Wallet ZK)', commitment, async () => {
-          console.log('[Lace ZK] Calling proveEligibility circuit for commitment:', commitment);
+          console.log('[TX] proveEligibility started');
+          console.log('[Lace ZK] Fetching real-time balance before transaction...');
+          if (!connectedApiRef.current) {
+            throw new Error(
+              'Lace wallet is not connected. Please reconnect Lace and try again.'
+            );
+          }
+
+          let currentBalance: bigint;
+
+          try {
+            const balances = await connectedApiRef.current.getUnshieldedBalances();
+
+            currentBalance =
+              balances['00'] ?? Object.values(balances)[0] ?? 0n;
+
+            console.log(
+              '[Lace ZK] Real-time balance (micro-tNIGHT):',
+              currentBalance.toString()
+            );
+
+            setConnectedWallet(prev =>
+              prev
+                ? { ...prev, tNight: currentBalance.toString() }
+                : null
+            );
+          } catch (err) {
+            console.error(
+              '[Lace ZK] Wallet API balance lookup failed:',
+              err
+            );
+
+            throw new Error(
+              'Lace wallet connection expired. Please disconnect and reconnect Lace, then try again.',
+              { cause: err }
+            );
+          }
+
+          if (currentBalance < 2_000_000n) {
+            throw new Error(
+              'Insufficient tNIGHT balance. At least 2 tNIGHT is required.'
+            );
+          }
+
+          console.log('[TX] contract call created. Executing proveEligibility circuit...');
           setTxProgress((prev: any) => prev ? { ...prev, step: 'proving', message: 'Generating local ZK proof...' } : null);
 
           // Convert hex commitment to Bytes<32>
           const commitmentBytes = new Uint8Array(Buffer.from(commitment, 'hex'));
           const tx = await deployedContract.callTx.proveEligibility(commitmentBytes);
+
+          console.log('[TX] proof completed');
+          console.log('[TX] transaction object created');
+          console.log('[TX] submitTransaction completed');
 
           setTxProgress((prev: any) => prev ? { ...prev, step: 'signing', message: 'Submitting transaction via Lace Wallet...', txId: tx.public.txId, blockHeight: tx.public.blockHeight } : null);
 
@@ -728,6 +881,11 @@ function App() {
           </span>
           {connectedWallet ? (
             <>
+              {contractInitFailed && (
+                <span className="pill pill-err">
+                  ⚠️ Contract Init Failed
+                </span>
+              )}
               <span
                 className="pill pill-neutral"
                 style={{ cursor: 'pointer', borderColor: 'var(--emerald-border)' }}
@@ -739,6 +897,13 @@ function App() {
               <span className="pill pill-neutral">
                 💰 {Number(connectedWallet.tNight).toLocaleString()} tNIGHT
               </span>
+              <button 
+                className="btn btn-secondary btn-small" 
+                onClick={handleFaucetRequest}
+                disabled={isRequestingFaucet}
+              >
+                {isRequestingFaucet ? 'Funding...' : 'Request 20 tNIGHT Faucet'}
+              </button>
               <button className="btn btn-secondary btn-small" onClick={disconnectWallet}>
                 Disconnect
               </button>
@@ -761,6 +926,32 @@ function App() {
       {toast && (
         <div className={`toast toast-${toast.kind}`} role="status">
           {toast.text}
+        </div>
+      )}
+
+      {contractInitFailed && (
+        <div className="contract-error-banner" style={{
+          margin: '20px auto',
+          maxWidth: '1200px',
+          padding: '16px 20px',
+          background: 'rgba(244, 63, 94, 0.18)',
+          border: '1px solid var(--rose-border)',
+          color: '#fda4af',
+          borderRadius: '12px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          boxShadow: 'var(--shadow)',
+          animation: 'toast-in 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+        }}>
+          <span style={{ fontSize: '20px' }}>⚠️</span>
+          <div>
+            <strong style={{ color: '#fda4af' }}>Wallet connected, contract initialization failed.</strong>
+            <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--text-s)' }}>
+              We could not connect to the Shadow-KYC smart contract or configure the Midnight client providers. 
+              The application is running in read-only / offline mode. Make sure the local devnet or Preprod indexer & prover servers are running and healthy.
+            </p>
+          </div>
         </div>
       )}
 
@@ -849,54 +1040,33 @@ function App() {
             </div>
             <div className="wallet-modal-body">
               <div className="wallet-list">
-                <p className="wallet-list-sub">Select an injected extension or instant web wallet:</p>
+                <p className="wallet-list-sub">Select your Midnight wallet extension:</p>
 
-                {/* Instant Devnet Web Wallet Option */}
-                <button
-                  className="wallet-item-btn"
-                  onClick={connectWebWallet}
-                  disabled={isConnectingWallet}
-                  style={{ background: 'rgba(16, 185, 129, 0.08)', borderColor: 'var(--emerald-border)' }}
-                >
-                  <span className="wallet-icon">⚡</span>
-                  <div className="wallet-info">
-                    <span className="wallet-name" style={{ color: '#fff' }}>
-                      Midnight Devnet Web Wallet
-                    </span>
-                    <span className="wallet-meta" style={{ color: 'var(--emerald)' }}>
-                      Instant Connect (10,000 tNIGHT pre-funded)
-                    </span>
-                  </div>
-                  <span className="wallet-arrow">➔</span>
-                </button>
-
-                {/* Injected Extensions */}
-                {availableWallets.map((wallet) => (
-                  <button
-                    key={wallet.id}
-                    className="wallet-item-btn"
-                    onClick={() => void connectWallet(wallet.id)}
-                    disabled={isConnectingWallet}
-                  >
-                    <span className="wallet-icon">💳</span>
-                    <div className="wallet-info">
-                      <span className="wallet-name">{wallet.name}</span>
-                      <span className="wallet-meta">Injected Extension API (v4+)</span>
-                    </div>
-                    <span className="wallet-arrow">➔</span>
-                  </button>
-                ))}
+                {availableWallets
+                  .filter(w => w.id.toLowerCase().includes('lace') || w.name.toLowerCase().includes('lace'))
+                  .map((wallet) => (
+                    <button
+                      key={wallet.id}
+                      className="wallet-item-btn"
+                      onClick={() => void connectWallet(wallet.id)}
+                      disabled={isConnectingWallet}
+                    >
+                      <span className="wallet-icon">💳</span>
+                      <div className="wallet-info">
+                        <span className="wallet-name">{wallet.name}</span>
+                        <span className="wallet-meta">Official Midnight Extension</span>
+                      </div>
+                      <span className="wallet-arrow">➔</span>
+                    </button>
+                  ))}
               </div>
 
-              {availableWallets.length === 0 && (
+              {!availableWallets.some(w => w.id.toLowerCase().includes('lace') || w.name.toLowerCase().includes('lace')) && (
                 <div className="no-wallets-found" style={{ marginTop: '20px' }}>
                   <p className="no-wallets-sub">
-                    Install a Midnight compatible Chrome extension for hardware/browser wallet integration:
+                    Lace wallet extension not found in your browser.
                   </p>
                   <div className="download-links">
-                    <a href="https://1am.xyz" target="_blank" rel="noopener noreferrer" className="download-link">
-                      📥 Install 1AM Wallet
-                    </a>
                     <a href="https://lace.io" target="_blank" rel="noopener noreferrer" className="download-link">
                       📥 Install Lace Wallet
                     </a>
