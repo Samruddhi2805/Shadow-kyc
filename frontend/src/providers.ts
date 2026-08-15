@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Buffer } from 'buffer';
+import { API_BASE } from './api';
 import { type ConnectedAPI } from '@midnight-ntwrk/dapp-connector-api';
 import { FetchZkConfigProvider } from '@midnight-ntwrk/midnight-js-fetch-zk-config-provider';
 import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider';
@@ -27,7 +28,8 @@ export async function initializeClientProviders(
   // Set the indexer and prover endpoints dynamically from the connected wallet
   const indexerUri = config.indexerUri;
   const indexerWsUri = config.indexerWsUri;
-  const proverServerUri = `${window.location.origin}/api/prover`;
+  // Use the same backend origin as the API client (Cloudflare tunnel when on Vercel)
+  const proverServerUri = API_BASE.replace(/\/api$/, '') + '/api/prover';
 
   console.log(`[Providers] Target Network: ${networkId}`);
   console.log(`[Providers] Indexer URI:    ${indexerUri}`);
