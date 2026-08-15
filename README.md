@@ -176,8 +176,8 @@ Test Files  1 passed (1)
 
 | Service / Feature | Status | URL |
 |---|---|---|
-| **Vercel Frontend** | ⏳ Pending Deployment | `[TBD - Pending Production Deployment]` |
-| **Production API Backend** | ⏳ Pending Deployment | `[TBD - Pending Production Deployment]` |
+| **Vercel Frontend** | ✅ Active / Deployed | `https://shadow-kyc.vercel.app` |
+| **Production API Backend** | 🔗 Tunnel Active | `https://agreed-tan-automobiles-domain.trycloudflare.com/api` (Cloudflare Quick Tunnel) |
 | **ZK Proof Server** | 💻 User Host | `http://127.0.0.1:6300` (Localhost requirement) |
 
 > [!WARNING]
@@ -219,7 +219,7 @@ The client-side private witness `localSecret` is generated locally in the browse
 - [x] Privacy claim documented in README
 - [x] Preprod contract address documented
 - [x] 13 meaningful commits in repository history
-- [ ] Live Vercel demo — pending deployment
+- [x] Live Vercel demo — https://shadow-kyc.vercel.app
 - [ ] Demo video — pending recording
 
 ---
