@@ -6,7 +6,7 @@
   "author": "Samruddhi Nevse",
   "license": "MIT",
   "scripts": {
-    "compile": "export PATH=\"$HOME/.local/bin:$PATH\"; if ! command -v compact >/dev/null 2>&1; then curl --proto '=https' --tlsv1.2 -LsSf https://github.com/midnightntwrk/compact/releases/latest/download/compact-installer.sh | sh && export PATH=\"$HOME/.local/bin:$PATH\"; fi; compact compile contracts/shadow-kyc.compact contracts/managed/shadow-kyc",
+    "compile": "export PATH=\"$HOME/.local/bin:$PATH\"; if ! command -v compact >/dev/null 2>&1; then curl --proto '=https' --tlsv1.2 -LsSf https://github.com/midnightntwrk/compact/releases/latest/download/compact-installer.sh | sh && export PATH=\"$HOME/.local/bin:$PATH\"; fi; if [ ! -d \"$HOME/.compact/versions/0.31.1\" ]; then compact update 0.31.1; fi; compact compile contracts/shadow-kyc.compact contracts/managed/shadow-kyc",
     "compile:frontend": "npm run compile && rm -rf frontend/public/keys frontend/public/zkir && mkdir -p frontend/public/keys frontend/public/zkir && cp -r contracts/managed/shadow-kyc/keys/* frontend/public/keys/ && cp -r contracts/managed/shadow-kyc/zkir/* frontend/public/zkir/",
     "build": "npx tsc --noEmit",
     "setup": "npx tsx src/setup.ts",
