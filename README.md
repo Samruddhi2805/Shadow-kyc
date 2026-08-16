@@ -256,6 +256,40 @@ The client-side private witness `localSecret` is generated locally in the browse
 
 ---
 
+## 📦 Level 2 Submission Information
+
+- **GitHub Repository:** https://github.com/Samruddhi2805/Shadow-kyc
+- **Live Demo:** https://shadow-kyc.vercel.app/
+- **Midnight Preprod Contract Address:**
+  `1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0`
+
+### Level 2 Requirements
+
+| Requirement | Status | Details |
+|---|---|---|
+| **Lace Connect** | ✅ Supported | Dynamic detection and connection to Lace Wallet on Midnight Preprod |
+| **Lace Disconnect** | ✅ Supported | Full state clearing and session disconnection |
+| **Frontend Circuit Call** | ✅ Supported | Client-side circuit execution via Midnight.js SDK |
+| **ZK Proof Generation** | ✅ Supported | Frontend initiates the ZK proving flow using the configured Midnight proof provider |
+| **Private Input Not Revealed in UI** | ✅ Verified | Private witness (`localSecret`) is not displayed or exposed in UI |
+| **Observable Privacy Behavior** | ✅ Verified | Zero-knowledge proof verifies eligibility without revealing the secret |
+| **Preprod Deployment** | ✅ Deployed | Smart contract deployed and active on Midnight Preprod Testnet |
+| **Verifiable Contract Address** | ✅ Verified | `1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0` |
+| **Live Frontend** | ✅ Deployed | Vercel deployment hosted at https://shadow-kyc.vercel.app/ |
+| **Minimum 8 Meaningful Commits** | ✅ Exceeded | Repository currently has 9 meaningful commits |
+
+### Demo Video
+
+The demo video demonstrates:
+1. Lace wallet connection
+2. Successful frontend circuit call
+3. Local ZK proof generation
+4. Lace transaction signing
+5. Successful Midnight Preprod transaction
+6. Privacy behavior without revealing the private input
+
+---
+
 ## 📂 Project Structure
 
 ```text
