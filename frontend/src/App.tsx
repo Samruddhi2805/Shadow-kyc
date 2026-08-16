@@ -596,7 +596,17 @@ function App() {
         if (err?.message) details.push(`Message: ${err.message}`);
         if (err?.code) details.push(`Code: ${err.code}`);
         if (err?.reason) details.push(`Reason: ${err.reason}`);
-        if (err?.cause) {
+        let rootError: any = err;
+        let depth = 0;
+        while (rootError?.cause && depth < 10) {
+          rootError = rootError.cause;
+          depth++;
+          console.error(`[TX ROOT CAUSE \${depth}]`, rootError?.message || rootError);
+        }
+        const rootMessage = rootError?.message || rootError?.reason || (typeof rootError === 'string' ? rootError : '');
+        if (rootMessage && rootMessage !== err?.message) {
+          details.push(`Root Error: ${rootMessage}`);
+        } else if (err?.cause) {
           const causeMsg = err.cause?.message || err.cause?.reason || String(err.cause);
           details.push(`Cause: ${causeMsg}`);
         }
