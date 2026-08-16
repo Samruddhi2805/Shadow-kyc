@@ -499,7 +499,7 @@ async function handleRequest(
       
       proxyReq.on('error', (proxyErr) => {
         console.error('  ❌ Proof server proxy error:', proxyErr.message);
-        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.writeHead(502, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
         res.end(JSON.stringify({ error: `Proof server unreachable: ${proxyErr.message}` }));
       });
       
