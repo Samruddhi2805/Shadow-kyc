@@ -60,6 +60,8 @@ Shadow-KYC provides privacy-preserving KYC/AML verification for applications tha
 
 The Compact smart contract separates what is public on-chain from what remains private as a zero-knowledge witness.
 
+The user's private identity secret is used as a private witness during the ZK flow. A cryptographic commitment derived from the secret is used by the contract, allowing eligibility to be proven without revealing the underlying secret.
+
 ### Public — visible on-chain
 
 | Field | Type | Description |
@@ -185,9 +187,39 @@ Test Files  1 passed (1)
 
 ---
 
-## 🏆 Level 2 — Waxing Crescent Submission
+## Level 2 — Frontend + Lace + Preprod
 
-This submission upgrades the Level 1 implementation to run directly from the browser using the Lace wallet on the Midnight Preprod Network.
+Shadow-KYC is connected to a deployed frontend UI, integrated with the Lace Wallet extension, and deployed on the Midnight Preprod network.
+
+- Lace wallet connect/disconnect
+- Midnight.js frontend integration
+- Frontend circuit invocation
+- Zero-knowledge proof generation
+- Credential request, approval and revocation
+- ZK eligibility verification
+- Midnight Preprod deployment
+- Transaction/audit history
+
+### Preprod Contract
+
+Contract Address:
+
+`1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0`
+
+### Live Demo
+
+https://shadow-kyc.vercel.app/
+
+### Level 2 Demo Flow
+
+1. Connect Lace wallet
+2. Request KYC credential
+3. Generate ZK proof
+4. Sign transaction with Lace
+5. Confirm transaction on Midnight Preprod
+6. Approve credential
+7. Prove eligibility without revealing the secret
+8. Revoke credential
 
 ### 1. Lace Wallet Connect / Disconnect
 The frontend dynamically scans the browser context for the injected `window.midnight` object. It filters and enforces connection negotiation strictly with **Lace Wallet** connected to **Preprod Testnet**. If Lace is locked, it prompts the user to unlock. Disconnection completely clears the `ConnectedAPI` instances, local state, and cached credentials.
@@ -264,49 +296,3 @@ GitHub: [https://github.com/Samruddhi2805](https://github.com/Samruddhi2805)
 ## 📜 License
 
 This project is licensed under the MIT License.
-
-## Level 2 — Frontend + Lace + Preprod
-
-Shadow-KYC is connected to a real frontend and deployed on the Midnight Preprod network.
-
-### Completed Features
-
-- Lace wallet connect/disconnect
-- Midnight.js frontend integration
-- KYC credential request from the frontend
-- Local private secret witness
-- Zero-knowledge proof generation
-- Credential approval and revocation
-- ZK eligibility verification
-- Preprod transaction submission
-- Transaction and audit history
-
-### Privacy Claim
-
-The user's identity secret is never revealed or stored on-chain.
-
-The secret remains local and is used to derive a cryptographic commitment. The commitment is used by the Midnight Compact contract instead of exposing the underlying secret.
-
-This allows eligibility to be proven without revealing the private identity value.
-
-### Preprod Contract
-
-Contract Address:
-
-`1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0`
-
-### Live Demo
-
-https://shadow-kyc.vercel.app/
-
-### Level 2 Demo Flow
-
-1. Connect Lace wallet
-2. Request KYC credential
-3. Generate ZK proof
-4. Sign transaction with Lace
-5. Confirm transaction on Midnight Preprod
-6. Approve credential
-7. Prove eligibility without revealing the secret
-8. Revoke credential
-
