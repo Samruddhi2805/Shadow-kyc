@@ -13,7 +13,7 @@ import type {
   TxResponse,
 } from './types';
 
-export const API_BASE = 'https://curriculum-provincial-survival-coat.trycloudflare.com/api';
+export const API_BASE = 'https://weekend-ict-environment-prediction.trycloudflare.com/api';
 const BASE = API_BASE;
 
 async function request<T>(path: string, init?: RequestInit & { timeout?: number }): Promise<T> {
