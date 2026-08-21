@@ -1,5 +1,7 @@
 # 🛡️ Shadow-KYC
 
+[![Shadow-KYC CI](https://github.com/Samruddhi2805/Shadow-kyc/actions/workflows/ci.yml/badge.svg)](https://github.com/Samruddhi2805/Shadow-kyc/actions/workflows/ci.yml)
+
 > Privacy-preserving KYC/AML verification using Zero-Knowledge Proofs (ZKPs) on the Midnight Preprod Testnet.
 
 Shadow-KYC is a decentralized KYC/AML system built on the **Midnight Network** using **Compact Smart Contracts**, **React**, **TypeScript**, and the **Midnight.js SDK** connected to the **Lace Wallet** (Preprod Network). Users can request identity verification and prove regulatory eligibility **without ever revealing their personal information** — the secret stays private, only its cryptographic commitment goes on-chain.
@@ -88,6 +90,18 @@ The `proveEligibility()` circuit proves that the user knows the secret correspon
 
 ---
 
+### 🔎 Privacy Claim
+
+**What an on-chain observer can see**
+
+An observer can see public contract state such as the authority name, credential commitments, pending and approved credential commitments, revoked credential commitments, and the eligibility proof counter.
+
+**What an on-chain observer cannot see**
+
+An observer cannot see the user's private secret or the underlying identity information represented by that secret. The user proves eligibility through a zero-knowledge proof without revealing the private witness.
+
+---
+
 ## 🛠️ Tech Stack
 
 | Layer | Technology |
@@ -171,6 +185,20 @@ Expected output:
 Test Files  1 passed (1)
     Tests  14 passed (14)
 ```
+
+---
+
+### ⚙️ CI/CD
+
+Shadow-KYC uses GitHub Actions to automatically validate the project on every push to `main` and every pull request.
+
+The pipeline:
+1. Checks out the repository
+2. Sets up Node.js 22
+3. Installs dependencies with `npm ci`
+4. Compiles the Compact smart contract with `npm run compile`
+5. Runs the 14-test Vitest suite with `npm test`
+6. Runs the TypeScript build with `npm run build`
 
 ---
 
@@ -287,6 +315,14 @@ The demo video demonstrates:
 4. Lace transaction signing
 5. Successful Midnight Preprod transaction
 6. Privacy behavior without revealing the private input
+
+---
+
+### 📋 Product Proposal
+
+Shadow-KYC is proposed under the Level 3 **Confidential Credentials** idea.
+
+See [`PROPOSAL.md`](./PROPOSAL.md) for the product proposal, privacy rationale, data model, and Mainnet feasibility.
 
 ---
 
