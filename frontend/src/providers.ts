@@ -28,8 +28,12 @@ export async function initializeClientProviders(
   // Set the indexer and prover endpoints dynamically from the connected wallet
   const indexerUri = config.indexerUri;
   const indexerWsUri = config.indexerWsUri;
-  // Use the same backend origin as the API client (Cloudflare tunnel when on Vercel)
-  const proverServerUri = API_BASE.replace(/\/api$/, '') + '/api/prover';
+  // Use the same backend origin as the API client (Cloudflare tunnel when on Vercel, or local proxy)
+  const base =
+    API_BASE.startsWith('http://') || API_BASE.startsWith('https://')
+      ? API_BASE.replace(/\/api\/?$/, '')
+      : `${window.location.origin}${API_BASE.replace(/\/api\/?$/, '')}`;
+  const proverServerUri = `${base}/api/prover`;
 
   console.log(`[Providers] Target Network: ${networkId}`);
   console.log(`[Providers] Indexer URI:    ${indexerUri}`);

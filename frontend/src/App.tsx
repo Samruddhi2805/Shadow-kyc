@@ -127,11 +127,17 @@ async function joinContract(
 }
 
 // Module-scoped connection cache to survive React StrictMode remounts
-let globalConnectingPromise: Promise<ConnectedAPI> | null = null;
 let globalConnectedAPI: ConnectedAPI | null = null;
 let globalConnectedWallet: ConnectedWalletInfo | null = null;
 let globalDeployedContract: FoundContract<ShadowKycContract<ShadowKycPrivateState>> | null = null;
 let globalContractInitFailed = false;
+
+function resetGlobalWalletState() {
+  globalConnectedAPI = null;
+  globalConnectedWallet = null;
+  globalDeployedContract = null;
+  globalContractInitFailed = false;
+}
 
 async function validateConnectedAPI(api: ConnectedAPI): Promise<boolean> {
   try {
@@ -228,6 +234,7 @@ function App() {
   const connectWallet = useCallback(async (walletId: string, isAutoConnect = false) => {
     globalContractInitFailed = false;
     setContractInitFailed(false);
+
     if (connectingRef.current) {
       console.log('[Wallet Connect] Connection already in progress, ignoring duplicate call.');
       return;
@@ -241,8 +248,8 @@ function App() {
     }
 
     // Verify that the selected wallet is actually Lace (or has 'lace' in ID/name)
-    const walletObj = window.midnight[walletId];
-    const isLace = walletId.toLowerCase().includes('lace') || (walletObj?.name || '').toLowerCase().includes('lace');
+    const initialWalletObj = window.midnight[walletId];
+    const isLace = walletId.toLowerCase().includes('lace') || (((initialWalletObj as any)?.name || '').toLowerCase().includes('lace'));
     if (!isLace) {
       if (!isAutoConnect) {
         showToast('error', 'Only Lace Wallet is supported for this application.');
@@ -250,38 +257,38 @@ function App() {
       return;
     }
 
-    // If we already have a fully established and active connection, validate it.
-    if (globalConnectedAPI && globalConnectedWallet && globalConnectedWallet.id === walletId) {
-      console.log('[Lace Connect] Validating cached ConnectedAPI...');
+    // For auto-connect only: if we already have an active verified connection, keep it
+    if (isAutoConnect && globalConnectedAPI && globalConnectedWallet && globalConnectedWallet.id === walletId) {
+      console.log('[Lace Connect] Validating existing ConnectedAPI for auto-connect...');
       const isValid = await validateConnectedAPI(globalConnectedAPI);
       if (isValid) {
-        console.log('[Lace Connect] Restoring existing active connection from global cache.');
         setConnectedWallet(globalConnectedWallet);
         if (globalDeployedContract) setDeployedContract(globalDeployedContract);
         setContractInitFailed(globalContractInitFailed);
         connectedApiRef.current = globalConnectedAPI;
         setShowWalletModal(false);
-        if (!isAutoConnect) {
-          showToast('success', `Successfully connected to ${walletObj.name || 'Lace'}!`);
-        }
         return;
       } else {
-        console.warn('[Lace Connect] Cached ConnectedAPI is stale. Clearing cache and reconnecting...');
-        globalConnectedAPI = null;
-        globalConnectedWallet = null;
-        globalDeployedContract = null;
-        globalConnectingPromise = null;
+        console.warn('[Lace Connect] Cached ConnectedAPI failed validation. Purging stale session...');
+        resetGlobalWalletState();
         connectedApiRef.current = null;
         setConnectedWallet(null);
         setDeployedContract(null);
         setContractInitFailed(false);
+        localStorage.removeItem('connectedWalletId');
       }
+    }
+
+    // Manual connection: always reset stale state to guarantee a fresh extension handshake
+    if (!isAutoConnect) {
+      resetGlobalWalletState();
+      connectedApiRef.current = null;
     }
 
     connectingRef.current = true;
     setIsConnectingWallet(true);
     if (!isAutoConnect) {
-      showToast('info', `Connecting to ${walletObj.name || 'Lace'}... Please check your wallet extension popup.`);
+      showToast('info', `Connecting to ${(initialWalletObj as any)?.name || 'Lace'}... Please check your wallet extension popup.`);
     }
 
     try {
@@ -291,66 +298,59 @@ function App() {
       let walletApi: ConnectedAPI | null = null;
       let lastErr: any = null;
 
-      const legacyWallet = walletObj as unknown as {
+      // Always retrieve the latest injected InitialAPI instance directly from window.midnight
+      const freshWalletObj = window.midnight?.[walletId] as unknown as {
         connect?: (networkId?: string) => Promise<ConnectedAPI>;
         enable?: () => Promise<ConnectedAPI>;
+        name?: string;
       };
 
-      if (globalConnectingPromise) {
-        console.log('[Lace Connect] Reusing existing pending connection promise...');
-        walletApi = await globalConnectingPromise;
-      } else {
-        // Step 1: Try connecting with targetNetwork parameter
-        if (typeof legacyWallet.connect === 'function') {
-          try {
-            console.log(`[Lace Connect] Trying connect('${targetNetwork}')...`);
-            globalConnectingPromise = legacyWallet.connect(targetNetwork);
-            walletApi = await globalConnectingPromise;
-          } catch (e: any) {
-            lastErr = e;
-            globalConnectingPromise = null;
-            console.warn(`[Lace Connect] connect('${targetNetwork}') failed, trying parameter-less connect():`, e);
-          }
-        }
+      if (!freshWalletObj) {
+        throw new Error(`Lace extension (${walletId}) is not available in window.midnight. Please ensure the extension is installed and enabled.`);
+      }
 
-        // Step 2: Try parameter-less connect() if first attempt failed
-        if (!walletApi && typeof legacyWallet.connect === 'function') {
-          try {
-            console.log('[Lace Connect] Trying parameter-less connect()...');
-            globalConnectingPromise = legacyWallet.connect();
-            walletApi = await globalConnectingPromise;
-          } catch (e: any) {
-            lastErr = e;
-            globalConnectingPromise = null;
-            console.warn('[Lace Connect] Parameter-less connect failed:', e);
-          }
+      // Step 1: Try connecting with targetNetwork parameter (e.g. 'preprod')
+      if (typeof freshWalletObj.connect === 'function') {
+        try {
+          console.log(`[Lace Connect] Requesting fresh connect('${targetNetwork}')...`);
+          walletApi = await freshWalletObj.connect(targetNetwork);
+        } catch (e: any) {
+          lastErr = e;
+          console.warn(`[Lace Connect] connect('${targetNetwork}') failed, trying parameter-less connect():`, e);
         }
+      }
 
-        // Step 3: Fallback to enable() if available
-        if (!walletApi && typeof legacyWallet.enable === 'function') {
-          try {
-            console.log('[Lace Connect] Trying legacy enable()...');
-            globalConnectingPromise = legacyWallet.enable();
-            walletApi = await globalConnectingPromise;
-          } catch (e: any) {
-            lastErr = e;
-            globalConnectingPromise = null;
-            console.warn('[Lace Connect] enable() failed:', e);
-          }
+      // Step 2: Try parameter-less connect() if first attempt failed
+      if (!walletApi && typeof freshWalletObj.connect === 'function') {
+        try {
+          console.log('[Lace Connect] Requesting fresh parameter-less connect()...');
+          walletApi = await freshWalletObj.connect();
+        } catch (e: any) {
+          lastErr = e;
+          console.warn('[Lace Connect] Parameter-less connect failed:', e);
         }
+      }
 
-        globalConnectingPromise = null;
+      // Step 3: Fallback to legacy enable() if available
+      if (!walletApi && typeof freshWalletObj.enable === 'function') {
+        try {
+          console.log('[Lace Connect] Requesting fresh legacy enable()...');
+          walletApi = await freshWalletObj.enable();
+        } catch (e: any) {
+          lastErr = e;
+          console.warn('[Lace Connect] enable() failed:', e);
+        }
       }
 
       if (!walletApi) {
-        throw lastErr || new Error(`Unable to connect to ${walletObj.name || walletId}. Please check the Lace extension popup and permissions.`);
+        throw lastErr || new Error(`Unable to connect to ${freshWalletObj.name || walletId}. Please check the Lace extension popup and permissions.`);
       }
 
-      console.log(`[Wallet Connection] Connected API:`, walletApi);
+      console.log(`[Wallet Connection] Connected API successfully established:`, walletApi);
       globalConnectedAPI = walletApi;
       connectedApiRef.current = walletApi;
 
-      // Address resolution based strictly on API typings
+      // Address resolution
       let finalAddress = '';
       try {
         const addressObj = await walletApi.getUnshieldedAddress();
@@ -383,7 +383,7 @@ function App() {
 
       const connectedWalletObj: ConnectedWalletInfo = {
         id: walletId,
-        name: walletObj.name || 'Lace',
+        name: freshWalletObj.name || 'Lace',
         address: finalAddress,
         tNight: rawBalance,
         dust: '0',
@@ -407,7 +407,6 @@ function App() {
           console.error('[Contract Join Error]', contractErr);
           globalContractInitFailed = true;
           setContractInitFailed(true);
-          // Do not throw contractErr so wallet remains connected in read-only mode
         }
       } else {
         globalContractInitFailed = false;
@@ -419,22 +418,42 @@ function App() {
       setShowWalletModal(false);
       setShowWalletSuccessPop(connectedWalletObj);
       if (!isAutoConnect) {
-        showToast('success', `Successfully connected to ${walletObj.name || 'Lace'}!`);
+        showToast('success', `Successfully connected to ${freshWalletObj.name || 'Lace'}!`);
       }
     } catch (err: any) {
       console.error('[Wallet Connection Error]', err);
+      resetGlobalWalletState();
+      connectedApiRef.current = null;
+      setConnectedWallet(null);
+      setDeployedContract(null);
+      setContractInitFailed(false);
+
+      const details = err?.message || err?.reason || String(err);
+      const errMsg = details.toLowerCase();
+      let displayMsg = details;
+
+      if (
+        errMsg.includes('midnight-authenticator') ||
+        errMsg.includes('midnight-connector') ||
+        errMsg.includes('shutdown') ||
+        errMsg.includes('no longer be used')
+      ) {
+        displayMsg = 'Lace session channel was reset. Please ensure Lace is unlocked, then click Connect Wallet again.';
+        localStorage.removeItem('connectedWalletId');
+      } else if (errMsg.includes('wallet is locked') || (errMsg.includes('locked') && !errMsg.includes('unlocked') && !errMsg.includes('block'))) {
+        displayMsg = 'Please unlock Lace, then click Connect Wallet.';
+        localStorage.removeItem('connectedWalletId');
+      } else if (err?.code === 'Rejected' || errMsg.includes('reject') || err?.code === 'PermissionRejected') {
+        displayMsg = 'Wallet connection rejected in Lace.';
+      } else if (errMsg.includes('network')) {
+        displayMsg = 'Please switch Lace to Midnight Preprod.';
+      }
+
       if (!isAutoConnect) {
-        const details = err?.message || err?.reason || String(err);
-        const errMsg = details.toLowerCase();
-        let displayMsg = details;
-        if (errMsg.includes('wallet is locked') || (errMsg.includes('locked') && !errMsg.includes('unlocked') && !errMsg.includes('block'))) {
-          displayMsg = 'Please unlock Lace, then click Connect Wallet.';
-        } else if (err?.code === 'Rejected' || errMsg.includes('reject') || err?.code === 'PermissionRejected') {
-          displayMsg = 'Wallet connection rejected.';
-        } else if (errMsg.includes('network')) {
-          displayMsg = 'Please switch Lace to Midnight Preprod.';
-        }
         showToast('error', displayMsg);
+      } else {
+        console.warn('[Auto-Connect Session Reset]', displayMsg);
+        localStorage.removeItem('connectedWalletId');
       }
     } finally {
       connectingRef.current = false;
@@ -453,7 +472,8 @@ function App() {
         void connectWallet(laceWallet.id, true);
       }
     }
-  }, [availableWallets, connectedWallet, connectWallet])
+  }, [availableWallets, connectedWallet, connectWallet]);
+
 
   const [isRequestingFaucet, setIsRequestingFaucet] = useState(false);
 
@@ -489,20 +509,15 @@ function App() {
   }, [connectedWallet, showToast]);
 
   const disconnectWallet = useCallback(() => {
-    globalConnectedAPI = null;
-    globalConnectedWallet = null;
-    globalDeployedContract = null;
-    globalConnectingPromise = null;
-    globalContractInitFailed = false;
-
-    setConnectedWallet(null)
-    setShowWalletSuccessPop(null)
-    setDeployedContract(null)
-    setContractInitFailed(false)
-    connectedApiRef.current = null
-    localStorage.removeItem('connectedWalletId')
-    showToast('info', 'Wallet disconnected')
-  }, [showToast])
+    resetGlobalWalletState();
+    setConnectedWallet(null);
+    setShowWalletSuccessPop(null);
+    setDeployedContract(null);
+    setContractInitFailed(false);
+    connectedApiRef.current = null;
+    localStorage.removeItem('connectedWalletId');
+    showToast('info', 'Wallet disconnected');
+  }, [showToast]);
 
   const copyToClipboard = useCallback((text: string, label: string) => {
     void navigator.clipboard.writeText(text)

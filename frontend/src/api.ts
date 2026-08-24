@@ -2,7 +2,8 @@
  * Thin typed client for the Shadow-KYC API server.
  *
  * In dev, Vite proxies /api to the API server (see vite.config.ts). In
- * production, requests are sent to the deployed Shadow-KYC API server.
+ * production, requests are sent to the deployed Shadow-KYC API server
+ * configured via VITE_API_BASE_URL.
  */
 import type {
   ApiError,
@@ -13,7 +14,9 @@ import type {
   TxResponse,
 } from './types';
 
-export const API_BASE = 'https://weekend-ict-environment-prediction.trycloudflare.com/api';
+export const API_BASE =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/+$/, '') ||
+  (import.meta.env.DEV ? '/api' : '');
 const BASE = API_BASE;
 
 async function request<T>(path: string, init?: RequestInit & { timeout?: number }): Promise<T> {
