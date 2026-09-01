@@ -2,32 +2,52 @@ name: Shadow-KYC CI
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
   pull_request:
-    branches: [main]
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   test:
+    name: Test, Compile & Build
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
+          cache: 'npm'
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Install Root Dependencies
+        run: npm ci || npm install
 
-      - name: Compile Compact contract
-        run: npm run compile
+      - name: Install Frontend Dependencies
+        run: npm --prefix frontend ci || npm --prefix frontend install
 
-      - name: Run tests
-        run: npm test
+      - name: Install Midnight Compact Compiler
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/midnightntwrk/compact/releases/latest/download/compact-installer.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.local/bin:$PATH"
+          compact --version
 
-      - name: TypeScript build
-        run: npm run build
+      - name: Compile Compact Smart Contract
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          npm run compile
+
+      - name: Run Vitest Smart Contract Tests
+        run: |
+          npx vitest run
+
+      - name: Run TypeScript Typecheck (Backend & Scripts)
+        run: |
+          npm run build
+
+      - name: Build Frontend Application
+        run: |
+          npm --prefix frontend run build
