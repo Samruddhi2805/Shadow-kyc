@@ -1,154 +1,257 @@
-# 🛡️ Shadow-KYC
+# 🛡️ Shadow-KYC — Zero-Knowledge Privacy Compliance on Midnight
 
 [![Shadow-KYC CI](https://github.com/Samruddhi2805/Shadow-kyc/actions/workflows/ci.yml/badge.svg)](https://github.com/Samruddhi2805/Shadow-kyc/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Midnight Network](https://img.shields.io/badge/Midnight-Preprod%20Testnet-6366f1)](https://midnight.network)
+[![Live Demo](https://img.shields.io/badge/Vercel-Live%20Demo-10b981)](https://shadow-kyc.vercel.app/)
 
-> Privacy-preserving KYC/AML verification using Zero-Knowledge Proofs (ZKPs) on the Midnight Preprod Testnet.
-
-Shadow-KYC is a decentralized KYC/AML system built on the **Midnight Network** using **Compact Smart Contracts**, **React**, **TypeScript**, and the **Midnight.js SDK** connected to the **Lace Wallet** (Preprod Network). Users can request identity verification and prove regulatory eligibility **without ever revealing their personal information** — the secret stays private, only its cryptographic commitment goes on-chain.
-
----
-
-## 🎯 What This Does
-
-Shadow-KYC provides privacy-preserving KYC/AML verification for applications that need regulatory compliance without requiring users to repeatedly expose sensitive identity documents. A user receives a cryptographic credential commitment after approval and can later prove eligibility using a zero-knowledge proof, allowing applications to verify compliance while keeping the underlying secret and user identity private.
+> Privacy-preserving KYC/AML regulatory compliance MVP powered by Zero-Knowledge Proofs (ZKPs) and Compact Smart Contracts on the Midnight Preprod Testnet.
 
 ---
 
-## ✨ Features
+## 📌 Problem
 
-- 🔒 Privacy-preserving identity verification using Zero-Knowledge Proofs (ZKPs)
-- 📄 Request KYC/AML credentials (user action, ZK proof generated client-side)
-- ✅ Authority approval workflow (on-chain Compact circuit)
-- ❌ Credential revocation by authority
-- 📜 On-chain credential registry (Midnight Preprod Testnet)
-- 📊 Dynamic client audit history
-- 🌐 React + TypeScript + Vite frontend with persistent Lace wallet connection
-- ⚡ Node.js REST API backend
-- 🧪 14/14 smart contract tests passing
+Traditional KYC (Know Your Customer) and AML (Anti-Money Laundering) compliance models suffer from fundamental privacy and security flaws:
+
+1. **Mass Centralized Honeypots**: Users are forced to upload unencrypted government IDs, passports, utility bills, and biometric scans to centralized servers. These databases are prime targets for cyberattacks, leaks, and identity theft.
+2. **Over-Disclosure of Personal Information**: When proving that a user is of legal age, resides in an authorized jurisdiction, or is not on a sanctions list, traditional KYC reveals their full name, date of birth, address, and document numbers.
+3. **Loss of User Sovereignty**: Once submitted, users cannot revoke or control where their personally identifiable information (PII) is transferred, analyzed, or monetized.
 
 ---
 
-## 📜 Contract Addresses
+## 💡 Solution
 
-| Network | Contract Address | Status |
-|---------|------------------|--------|
-| **Preprod (Level 2)** | `1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0` | ✅ Active / Deployed |
-| **Preview (Level 1)** | `3508cc15dd43ad50f9af84d722fd71aba6b9a45eea6731656e539c195499bbcb` | ✅ Legacy / Deployed |
+**Shadow-KYC** resolves the tension between regulatory compliance and user privacy using the **Midnight Blockchain** and **Compact Smart Contracts**:
+
+- **Private Witness Architecture**: The user's personal identity credentials remain strictly local as a private witness (`localSecret`). They are never transmitted over the network or stored on-chain.
+- **Cryptographic Commitments**: The Compact smart contract registers only a cryptographic hash commitment (`persistentHash(localSecret)`). Observers see only a 32-byte hash, completely decoupling identity from ledger state.
+- **Zero-Knowledge Proof of Eligibility**: When interacting with compliant protocols, users execute client-side ZK circuits (`proveEligibility`). The circuit mathematically proves that the caller knows the secret corresponding to an active, authority-approved credential **without revealing the secret itself** ("Proved without revealing your input").
+- **Instant Revocability**: Authorities retain the ability to revoke credentials on-chain if compliance criteria change, immediately invalidating subsequent ZK proofs.
+
+---
+
+## ✨ Implemented Features
+
+| Feature | Description | Status |
+| :--- | :--- | :--- |
+| **Lace Wallet Integration** | Dynamic browser extension detection, connection negotiation, session persistence, and disconnect for Midnight Lace Wallet on Preprod. | ✅ Verified |
+| **Client-Side ZK Proving** | Executes Compact circuits directly in the browser via `FetchZkConfigProvider` and local ZK proof server. | ✅ Verified |
+| **Credential Issuance Circuit** | User calls `issueCredential()`; creates a cryptographic commitment of the private witness on-chain. | ✅ Verified |
+| **Authority Approval Circuit** | Authority verifies off-chain credentials and calls `approveCredential(commitment)` to transition status. | ✅ Verified |
+| **Zero-Knowledge Proof of Eligibility** | User calls `proveEligibility(commitment)`; increments `eligibilityCount` on-chain without revealing identity. | ✅ Verified |
+| **Credential Revocation** | Authority calls `revokeCredential(commitment)` to invalidate compromised or expired credentials. | ✅ Verified |
+| **In-Memory Private State** | Ephemeral private state provider (`in-memory-private-state-provider.ts`) prevents sensitive witness leaks to `localStorage`. | ✅ Verified |
+| **On-Chain Audit Trail** | Real-time audit history of confirmed Midnight transactions with block heights and transaction IDs. | ✅ Verified |
+| **Automated Test Suite** | 14 comprehensive Vitest smart contract tests validating circuits, state transitions, and edge cases. | ✅ 14/14 Passing |
+| **CI/CD Automation** | GitHub Actions pipeline compiling Compact circuits, running Vitest tests, and verifying frontend builds. | ✅ Active |
+
+---
+
+## 📜 Contract Address Table
+
+| Network | Contract Address | Deployer / Authority | On-Chain Verification |
+| :--- | :--- | :--- | :--- |
+| **Midnight Preprod** | `1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0` | `mn_addr_preprod1z9admutr02ys9fglnrg7z8w7pruwvr5kk75vjuqwwkm852vg76tq02ne8x` | Block `#2126833` · Tx `4e75f402...` |
+| **Midnight Preview** *(Legacy Level 1)* | `3508cc15dd43ad50f9af84d722fd71aba6b9a45eea6731656e539c195499bbcb` | `mn_addr_preview...` | Level 1 Deployment |
 
 ---
 
 ## 🏗️ Architecture
 
 ```text
-       React Frontend (Vite)
-                 │
-                 ▼
-     REST API Server (Node.js)
-                 │
-                 ├─── Midnight JS SDK ──▶ Midnight Preprod Network (RPC / Indexer)
-                 │                              │
-                 │                        Compact Smart Contract
-                 │                        (shadow-kyc.compact)
-                 │
-                 └─── ZK Proof Server (Docker / Host) — generates ZK proofs locally
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                                USER BROWSER                                      │
+│                                                                                 │
+│   ┌──────────────────────────┐          ┌───────────────────────────────────┐   │
+│   │   React 19 Frontend UI   │          │        Lace Wallet (Preprod)      │   │
+│   │  (Vite + TypeScript)     │          │  - Dynamic Extension Detection    │   │
+│   └────────────┬─────────────┘          │  - DUST / tNIGHT Fee Balancing    │   │
+│                │                        │  - Transaction Signing            │   │
+│                │                        └─────────────────┬─────────────────┘   │
+│                │                                          │                     │
+│                ▼                                          ▼                     │
+│   ┌─────────────────────────────────────────────────────────────────────────┐   │
+│   │                   Midnight.js SDK Client Runtime                        │   │
+│   │   - In-Memory Private State Provider (Zero LocalStorage Leaks)          │   │
+│   │   - Static ZK Keys & ZKIR Loader (FetchZkConfigProvider)                │   │
+│   └────────────┬──────────────────────────────────────────┬─────────────────┘   │
+└────────────────┼──────────────────────────────────────────┼─────────────────────┘
+                 │                                          │
+                 ▼                                          ▼
+  ┌──────────────────────────────┐          ┌─────────────────────────────────────┐
+  │   Local ZK Proof Server      │          │      Midnight Preprod Network       │
+  │   (Docker container :6300)   │          │  - Node RPC (rpc.preprod)           │
+  │   - Proves Compact circuits  │          │  - GraphQL Indexer (indexer.preprod)│
+  │   - Zero knowledge generated │          │  - On-Chain Contract Ledger State   │
+  └──────────────────────────────┘          └─────────────────────────────────────┘
 ```
 
-> [!NOTE]
-> For browser-based transaction execution, ZK proof generation is performed locally. The DApp client proxies proof generation requests to the local proof-server running on the user's machine at `http://127.0.0.1:6300`.
+### 🔐 Zero-Knowledge Privacy Flow
+
+1. **Identity Witness (`localSecret`)**:
+   - The user's device generates or holds a 32-byte witness `localSecret`.
+   - This witness is provided strictly to the client-side circuit context. It is **never** sent to the network, server, or chain.
+2. **On-Chain Commitment (`issueCredential`)**:
+   - The circuit computes `commitment = persistentHash<Bytes<32>>(localSecret)`.
+   - The commitment is added to `pendingCredentials`. Observers only see a 32-byte cryptographic hash.
+3. **Authority Approval (`approveCredential`)**:
+   - The authority authenticates with its own key and promotes the commitment to the `credentials` set.
+4. **Zero-Knowledge Proof of Compliance (`proveEligibility`)**:
+   - When a user needs to prove compliance, they execute `proveEligibility(commitment)`.
+   - The zero-knowledge proof verifies two facts simultaneously:
+     - The caller possesses the preimage `localSecret` that hashes to `commitment`.
+     - `commitment` is currently a member of `credentials` and is not in `revokedCredentials`.
+   - The transaction increments `eligibilityCount` on the ledger.
+   - **Privacy Guarantee**: Any on-chain observer or verifier learns that *a compliant, verified user* performed the action, but cannot determine *which user* it was.
 
 ---
 
-## 🔐 Privacy Model
+## 🔄 User Flow
 
-The Compact smart contract separates what is public on-chain from what remains private as a zero-knowledge witness.
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as User (Browser)
+    participant Lace as Lace Wallet (Preprod)
+    participant App as Shadow-KYC Frontend
+    participant Prover as ZK Proof Server (:6300)
+    participant Chain as Midnight Preprod Blockchain
 
-The user's private identity secret is used as a private witness during the ZK flow. A cryptographic commitment derived from the secret is used by the contract, allowing eligibility to be proven without revealing the underlying secret.
+    User->>App: Open Shadow-KYC DApp
+    User->>Lace: Click "Connect Wallet"
+    Lace-->>App: Return ConnectedAPI (address & balances)
+    
+    rect rgb(24, 24, 37)
+        Note over User,Prover: Step 1: Credential Request
+        User->>App: Input identity secret & click "Request Credential"
+        App->>Prover: Generate ZK Proof for issueCredential(secret)
+        Prover-->>App: Return ZK Proof & unbound tx
+        App->>Lace: Request signature & fee balancing
+        Lace-->>App: Return balanced, signed tx
+        App->>Chain: Broadcast transaction
+        Chain-->>App: Commitment added to pendingCredentials
+    end
 
-### Public — visible on-chain
+    rect rgb(24, 24, 37)
+        Note over App,Chain: Step 2: Authority Approval
+        App->>Chain: Authority executes approveCredential(commitment)
+        Chain-->>App: Commitment moved to active credentials set
+    end
 
-| Field | Type | Description |
-|---|---|---|
-| `authority` | `Bytes<32>` | Authority dapp-specific public key |
-| `authorityName` | `Opaque<string>` | Authority public name |
-| `pendingCredentials` | `Set<Bytes<32>>` | Credential commitments awaiting approval |
-| `credentials` | `Set<Bytes<32>>` | Approved credential commitments |
-| `revokedCredentials` | `Set<Bytes<32>>` | Revoked credential commitments |
-| `eligibilityCount` | `Uint<64>` | Public counter of eligibility proofs performed |
-
-### Private — not revealed in on-chain state
-
-| Element | Description |
-|---|---|
-| `localSecret()` witness | The caller's 32-byte secret used privately during proof generation; never exposed on-chain |
-| User identity | The underlying identity information represented by the secret |
-
-The credential commitment is computed inside the circuit using Midnight's built-in `persistentHash`.
-
-### What the user proves without revealing
-
-The `proveEligibility()` circuit proves that the user knows the secret corresponding to an approved credential commitment without revealing the secret itself ("Proved without revealing your input").
-
----
-
-### 🔎 Privacy Claim
-
-**What an on-chain observer can see**
-
-An observer can see public contract state such as the authority name, credential commitments, pending and approved credential commitments, revoked credential commitments, and the eligibility proof counter.
-
-**What an on-chain observer cannot see**
-
-An observer cannot see the user's private secret or the underlying identity information represented by that secret. The user proves eligibility through a zero-knowledge proof without revealing the private witness.
+    rect rgb(24, 24, 37)
+        Note over User,Chain: Step 3: ZK Proof of Eligibility
+        User->>App: Click "Prove Eligibility"
+        App->>Prover: Generate ZK proof proving knowledge of secret
+        Prover-->>App: Return ZK proof (no identity exposed)
+        App->>Lace: Sign transaction
+        App->>Chain: Submit proveEligibility(commitment)
+        Chain-->>App: eligibilityCount incremented on-chain!
+    end
+```
 
 ---
 
 ## 🛠️ Tech Stack
 
-| Layer | Technology |
-|--------|------------|
-| Smart Contract | Compact (Midnight DSL) |
-| Blockchain | Midnight Preprod Testnet |
-| Frontend | React + TypeScript + Vite |
-| Backend | Node.js + REST API |
-| Wallet | Lace Wallet (Chrome Extension, Preprod network) |
-| ZK Proofs | Midnight Proof Server (Local Docker container, port 6300) |
-| Testing | Vitest |
+- **Smart Contract DSL**: Compact `0.5.1` (Midnight Network)
+- **Blockchain**: Midnight Preprod Testnet
+- **Wallet Extension**: Lace Wallet (Midnight Preprod configuration)
+- **Client Libraries**:
+  - `@midnight-ntwrk/midnight-js-contracts` `4.1.1`
+  - `@midnight-ntwrk/midnight-js-fetch-zk-config-provider` `4.1.1`
+  - `@midnight-ntwrk/midnight-js-http-client-proof-provider` `4.1.1`
+  - `@midnight-ntwrk/midnight-js-indexer-public-data-provider` `4.1.1`
+  - `@midnight-ntwrk/midnight-js-network-id` `4.1.1`
+  - `@midnight-ntwrk/dapp-connector-api` `^4.0.1`
+  - `@midnight-ntwrk/compact-runtime` `0.16.0`
+- **Frontend**: React 19, TypeScript 6, Vite 8, Rolldown WASM integration
+- **Backend / Utilities**: Node.js 22, TypeScript, Express / HTTP API
+- **ZK Prover**: `midnightntwrk/proof-server:8.1.0` (Docker)
+- **Indexer**: `midnightntwrk/indexer-standalone:4.3.3` (Docker)
+- **Testing Framework**: Vitest 3.2
 
 ---
 
-## 🚀 Getting Started
+## 📋 Approved Product Proposal
 
-### Prerequisites
+Shadow-KYC was proposed and approved under the Level 3 Confidential Credentials milestone.
+See [`PROPOSAL.md`](./PROPOSAL.md) for the original product proposal, privacy rationale, data model, and Mainnet feasibility roadmap.
 
-- Node.js >= 22
-- Docker Desktop (with WSL2 integration enabled)
-- **Lace Wallet** browser extension (set to **Preprod Testnet**)
-- Compact compiler (from Midnight Developer Hub)
+---
 
-### Install
+## 🚀 Prerequisites
+
+Before running locally, ensure you have:
+
+1. **Node.js**: `v22.x` or higher (`node --version`)
+2. **Docker Desktop**: With WSL2 integration enabled on Windows
+3. **Lace Wallet**: Chrome extension set to **Midnight Preprod Testnet**
+4. **Compact Compiler**: Installed via Midnight Developer Hub:
+   ```bash
+   curl --proto '=https' --tlsv1.2 -LsSf https://github.com/midnightntwrk/compact/releases/latest/download/compact-installer.sh | sh
+   export PATH="$HOME/.local/bin:$PATH"
+   ```
+
+---
+
+## 📥 Installation
 
 ```bash
-git clone https://github.com/Samruddhi2805/shadow-kyc.git
-cd shadow-kyc
+# Clone the repository
+git clone https://github.com/Samruddhi2805/Shadow-kyc.git
+cd Shadow-kyc
+
+# Install root dependencies
 npm install
+
+# Install frontend dependencies
+npm --prefix frontend install
 ```
 
-### Start Infrastructure (Docker)
+---
+
+## ⚙️ Environment Variables
+
+Copy `.env.example` to create your local `.env`:
+
+```bash
+cp .env.example .env
+```
+
+| Variable | Description | Example |
+| :--- | :--- | :--- |
+| `NETWORK` | Target Midnight network (`preprod`, `preview`, or `undeployed`) | `preprod` |
+| `VITE_NETWORK` | Frontend target network identifier | `preprod` |
+| `CONTRACT_ADDRESS` | Deployed Midnight Compact contract address (64 hex characters) | `1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0` |
+| `VITE_CONTRACT_ADDRESS`| Frontend smart contract address | `1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0` |
+| `MIDNIGHT_INDEXER_URL` | Preprod GraphQL indexer endpoint | `https://indexer.preprod.midnight.network/api/v4/graphql` |
+| `MIDNIGHT_NODE_URL` | Preprod Node RPC endpoint | `https://rpc.preprod.midnight.network` |
+| `MIDNIGHT_PROOF_SERVER_URL` | Local ZK proof server URL | `http://127.0.0.1:6300` |
+
+> 🔒 **Security Notice:** Never commit `.env` or `.env.local` files containing secrets, seed phrases, or private keys to version control.
+
+---
+
+## 💻 Local Development
+
+### 1. Start the ZK Proof Server (Docker)
 
 ```bash
 npm run proof-server:start
 ```
+Verify health:
+```bash
+curl http://127.0.0.1:6300
+# Expected: {"status":"ok", ...}
+```
 
-This starts the `risein-proof-server` container for local ZK proof generation on port 6300.
-
-### Compile the Smart Contract
+### 2. Compile the Compact Smart Contract
 
 ```bash
 npm run compile
 ```
-
 Expected output:
-```
+```text
 Compiling 4 circuits:
 circuit "approveCredential" (k=13, rows=4459)
 circuit "issueCredential"   (k=13, rows=2281)
@@ -156,202 +259,118 @@ circuit "proveEligibility"  (k=13, rows=2631)
 circuit "revokeCredential"  (k=13, rows=4459)
 ```
 
-### Start the API Server
-
-```bash
-npm run api:fresh
-```
-
-### Start the Frontend
-
-```bash
-npm run frontend:dev
-```
-
-Then open `http://localhost:5173`.
-
----
-
-## ✅ Running Tests
+### 3. Run Automated Tests
 
 ```bash
 npm test
 ```
-
-Expected output:
-
-```
-✓ tests/shadow-kyc.test.ts (14 tests) ~330ms
-Test Files  1 passed (1)
-    Tests  14 passed (14)
-```
-
----
-
-### ⚙️ CI/CD
-
-Shadow-KYC uses GitHub Actions to automatically validate the project on every push to `main` and every pull request.
-
-The pipeline:
-1. Checks out the repository
-2. Sets up Node.js 22
-3. Installs dependencies with `npm ci`
-4. Compiles the Compact smart contract with `npm run compile`
-5. Runs the 14-test Vitest suite with `npm test`
-6. Runs the TypeScript build with `npm run build`
-
----
-
-## 🌐 Deployment Status
-
-| Service / Feature | Status | URL |
-|---|---|---|
-| **Vercel Frontend** | ✅ Active / Deployed | `https://shadow-kyc.vercel.app` |
-| **Production API Backend** | 🔗 Tunnel Active | `https://agreed-tan-automobiles-domain.trycloudflare.com/api` (Cloudflare Quick Tunnel) |
-| **ZK Proof Server** | 💻 User Host | `http://127.0.0.1:6300` (Localhost requirement) |
-
-> [!WARNING]
-> The deployed Vercel frontend relies on a locally running ZK proof-server on the user's host (at `http://127.0.0.1:6300`) for generating client-side ZK transaction proofs. It is not fully serverless for proof generation.
-
----
-
-## Level 2 — Frontend + Lace + Preprod
-
-Shadow-KYC is connected to a deployed frontend UI, integrated with the Lace Wallet extension, and deployed on the Midnight Preprod network.
-
-- Lace wallet connect/disconnect
-- Midnight.js frontend integration
-- Frontend circuit invocation
-- Zero-knowledge proof generation
-- Credential request, approval and revocation
-- ZK eligibility verification
-- Midnight Preprod deployment
-- Transaction/audit history
-
-### Preprod Contract
-
-Contract Address:
-
-`1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0`
-
-### Live Demo
-
-https://shadow-kyc.vercel.app/
-
-### Level 2 Demo Flow
-
-1. Connect Lace wallet
-2. Request KYC credential
-3. Generate ZK proof
-4. Sign transaction with Lace
-5. Confirm transaction on Midnight Preprod
-6. Approve credential
-7. Prove eligibility without revealing the secret
-8. Revoke credential
-
-### 1. Lace Wallet Connect / Disconnect
-The frontend dynamically scans the browser context for the injected `window.midnight` object. It filters and enforces connection negotiation strictly with **Lace Wallet** connected to **Preprod Testnet**. If Lace is locked, it prompts the user to unlock. Disconnection completely clears the `ConnectedAPI` instances, local state, and cached credentials.
-
-### 2. Frontend Circuit Execution
-Using the Midnight JS SDK, the frontend binds compiled smart contract structures with the active wallet connector. The application triggers the `issueCredential` and `proveEligibility` circuits directly in the client browser, prompting Lace for transaction signatures.
-
-### 3. Local ZK Proof Generation
-Prover key (`.prover` files) and ZKIR artifacts (`.bzkir` files) are served statically under the frontend (`/keys` and `/zkir` folders) and loaded on-demand by `FetchZkConfigProvider`. The browser proxies ZK proof requests locally to the ZK proof-server on port 6300.
-
-### 4. Privacy Behavior
-The client-side private witness `localSecret` is generated locally in the browser, used during proof generation, and is not stored in on-chain ledger state.
-
-### 5. Successful Preprod Transaction Evidence
-
-*   **Smart Contract Address:** `1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0`
-*   **On-Chain Transaction ID (issueCredential):** `00c4d5f5adab653657f3d47346afd4ad56aa55a20700d30897de2ef54e8b6a5ed1`
-*   **Cryptographic Commitment Hash:** `0da0b4cd7295f6f0e1c0ebdf945a225fa90feee02934a81a3bcf9f241ae0571f`
-
-### 6. Level 2 Requirement Checklist
-- [x] Dynamic wallet detection of injected extensions (specifically Lace)
-- [x] Connect / Disconnect Lace Wallet (Preprod Testnet network validation)
-- [x] Load Preprod smart contract client in frontend React app
-- [x] Dynamic query of indexer endpoints from wallet configuration
-- [x] Fetch ZK config files statically via browser `FetchZkConfigProvider`
-- [x] Generate zero-knowledge proofs locally in browser (via proof-server port 6300)
-- [x] Execute Compact circuits directly from the frontend client
-- [x] Support browser-based transactions with DUST fee balancing
-- [x] Privacy claim documented in README
-- [x] Preprod contract address documented
-- [x] 13 meaningful commits in repository history
-- [x] Live Vercel demo — https://shadow-kyc.vercel.app
-- [ ] Demo video — pending recording
-
----
-
-## 📦 Level 2 Submission Information
-
-- **GitHub Repository:** https://github.com/Samruddhi2805/Shadow-kyc
-- **Live Demo:** https://shadow-kyc.vercel.app/
-- **Midnight Preprod Contract Address:**
-  `1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0`
-
-### Level 2 Requirements
-
-| Requirement | Status | Details |
-|---|---|---|
-| **Lace Connect** | ✅ Supported | Dynamic detection and connection to Lace Wallet on Midnight Preprod |
-| **Lace Disconnect** | ✅ Supported | Full state clearing and session disconnection |
-| **Frontend Circuit Call** | ✅ Supported | Client-side circuit execution via Midnight.js SDK |
-| **ZK Proof Generation** | ✅ Supported | Frontend initiates the ZK proving flow using the configured Midnight proof provider |
-| **Private Input Not Revealed in UI** | ✅ Verified | Private witness (`localSecret`) is not displayed or exposed in UI |
-| **Observable Privacy Behavior** | ✅ Verified | Zero-knowledge proof verifies eligibility without revealing the secret |
-| **Preprod Deployment** | ✅ Deployed | Smart contract deployed and active on Midnight Preprod Testnet |
-| **Verifiable Contract Address** | ✅ Verified | `1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0` |
-| **Live Frontend** | ✅ Deployed | Vercel deployment hosted at https://shadow-kyc.vercel.app/ |
-| **Minimum 8 Meaningful Commits** | ✅ Exceeded | Repository currently has 9 meaningful commits |
-
-### Demo Video
-
-The demo video demonstrates:
-1. Lace wallet connection
-2. Successful frontend circuit call
-3. Local ZK proof generation
-4. Lace transaction signing
-5. Successful Midnight Preprod transaction
-6. Privacy behavior without revealing the private input
-
----
-
-### 📋 Product Proposal
-
-Shadow-KYC is proposed under the Level 3 **Confidential Credentials** idea.
-
-See [`PROPOSAL.md`](./PROPOSAL.md) for the product proposal, privacy rationale, data model, and Mainnet feasibility.
-
----
-
-## 📂 Project Structure
-
+Verified actual test run:
 ```text
-shadow-kyc/
-├── contracts/
-│   ├── shadow-kyc.compact          # Compact smart contract source
-│   └── managed/
-│       └── shadow-kyc/             # Compiled artifacts (auto-generated)
-│           ├── contract/           # JS circuit binaries
-│           └── keys/               # Proving & verifying keys
-├── frontend/                       # React + TypeScript + Vite frontend
-│   └── src/
-│       ├── App.tsx                 # Main UI component
-│       ├── api.ts                  # API client
-│       └── types.ts                # Type definitions
-├── src/                            # Node.js backend
-│   ├── api-server.ts               # REST API + static file server
-│   ├── deploy.ts                   # Contract deployment script
-│   ├── cli.ts                      # Interactive CLI
-│   ├── network.ts                  # Network configuration
-│   └── wallet.ts                   # Wallet management
-├── tests/
-│   └── shadow-kyc.test.ts          # 14 Vitest smart contract tests
-├── compose.yml                     # Docker compose services
-└── package.json
+ ✓ tests/shadow-kyc.test.ts (14 tests) 262ms
+ Test Files  1 passed (1)
+      Tests  14 passed (14)
 ```
+
+### 4. Start the Frontend Development Server
+
+```bash
+npm run frontend:dev
+```
+Open [http://localhost:5173](http://localhost:5173) in your browser.
+
+---
+
+## 🌐 Live Deployments & Links
+
+| Resource | Link / Information |
+| :--- | :--- |
+| **Live Frontend Demo** | [https://shadow-kyc.vercel.app/](https://shadow-kyc.vercel.app/) |
+| **GitHub Repository** | [https://github.com/Samruddhi2805/Shadow-kyc](https://github.com/Samruddhi2805/Shadow-kyc) |
+| **Midnight Preprod Contract** | `1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0` |
+| **Product X (Twitter) Profile** | [@ShadowKYC_ZK](https://x.com/ShadowKYC_ZK) |
+| **Demo Video** | [`Shadow-KYC_Level2_Demo_Final.mp4`](./Shadow-KYC_Level2_Demo_Final.mp4) |
+
+---
+
+## ⚙️ CI/CD Pipeline
+
+Shadow-KYC uses **GitHub Actions** for continuous integration and validation. Every push and pull request to `main` triggers an automated run that:
+
+1. Checks out the repository and sets up Node.js 22.
+2. Installs root and frontend dependencies with clean npm cache.
+3. Automatically downloads and installs the official Midnight Compact compiler (`compact 0.5.1`).
+4. Compiles the Compact smart contract circuits into binaries and ZK keys.
+5. Executes the 14-test Vitest contract test suite.
+6. Runs TypeScript typechecking on backend scripts (`tsc --noEmit`).
+7. Executes the full production Vite build for the frontend bundle.
+
+Workflow file: [`.github/workflows/ci.yml`](./.github/workflows/ci.yml)
+
+---
+
+## 📢 Product X / Twitter Strategy & Launch Posts
+
+Shadow-KYC's public presence on X communicates the paradigm shift from centralized KYC surveillance to zero-knowledge privacy compliance:
+
+- **Handle**: [@ShadowKYC_ZK](https://x.com/ShadowKYC_ZK)
+- **Profile Name**: `Shadow-KYC | ZK Compliance on Midnight`
+- **Bio**: `Zero-Knowledge Privacy Compliance & KYC on @MidnightNtwrk. Prove regulatory eligibility without exposing personal identity. Live on Midnight Preprod.`
+
+### Post 1: The Vision & Problem
+> Traditional KYC is broken. Centralized databases hoard your passports, utility bills, and IDs—turning ordinary users into targets for catastrophic data breaches.
+> 
+> Introducing @ShadowKYC_ZK: Zero-Knowledge Privacy Compliance built on @MidnightNtwrk.
+> 
+> Prove you are compliant without revealing who you are. 🛡️🔐 #MidnightNetwork #ZeroKnowledge #Web3Security #BlockchainPrivacy
+
+### Post 2: The Cryptographic Architecture
+> How does Shadow-KYC achieve compliance without surveillance?
+> 
+> 1️⃣ User generates a local identity secret as a private ZK witness  
+> 2️⃣ A cryptographic commitment is registered on-chain  
+> 3️⃣ Authority verifies & approves the commitment  
+> 4️⃣ User proves eligibility via Compact ZK circuits—zero PII disclosed!  
+> 
+> Private by design on @MidnightNtwrk. ⚡ #ZKProofs #Cardano #PrivacyTech
+
+### Post 3: Live Preprod MVP Launch
+> 🚀 Shadow-KYC is officially LIVE on Midnight Preprod Testnet for Level 4 — Waxing Gibbous!
+> 
+> 🌐 Live App: https://shadow-kyc.vercel.app  
+> 📜 Verified Preprod Contract: 1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0  
+> 💻 Open-Source Code: https://github.com/Samruddhi2805/Shadow-kyc  
+> 
+> Connect your Lace wallet and experience zero-knowledge compliance today! 🛡️✨
+
+---
+
+## 🎥 Demo Video Walkthrough
+
+The demo video [`Shadow-KYC_Level2_Demo_Final.mp4`](./Shadow-KYC_Level2_Demo_Final.mp4) showcases the end-to-end user journey:
+
+1. **Lace Wallet Connection**: Dynamic extension detection, network validation on Midnight Preprod Testnet, and real-time balance retrieval.
+2. **Credential Issuance**: Client-side generation of the identity witness `localSecret` and zero-knowledge proof generation via the local prover.
+3. **Lace Transaction Signing**: DUST and tNIGHT fee balancing, transaction signing, and broadcast to the Midnight Preprod blockchain.
+4. **On-Chain Confirmation**: Ledger inclusion, block height recording, and transaction hash verification.
+5. **Zero-Knowledge Eligibility Verification**: Proving compliance with zero identity leakage, updating the on-chain compliance counter.
+
+---
+
+## 📋 Level 4 Submission Checklist
+
+| Level 4 Requirement | Status | Verification & Evidence |
+| :--- | :---: | :--- |
+| **Working MVP on Preprod** | ✅ | Deployed and verified on Midnight Preprod Testnet |
+| **Verifiable Contract Address** | ✅ | `1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0` (Block `#2126833`) |
+| **Public GitHub Repository** | ✅ | [https://github.com/Samruddhi2805/Shadow-kyc](https://github.com/Samruddhi2805/Shadow-kyc) |
+| **Complete README Documentation** | ✅ | Full problem/solution, ZK flow, tech stack, setup, and usage instructions |
+| **CI/CD Pipeline Running** | ✅ | GitHub Actions workflow [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) |
+| **CI/CD Workflow Badge** | ✅ | Integrated in README header pointing to active workflow |
+| **Live Frontend Deployment** | ✅ | Deployed on Vercel at [https://shadow-kyc.vercel.app/](https://shadow-kyc.vercel.app/) |
+| **Product X Profile Prepared** | ✅ | Profile handle, metadata, and 3 launch posts prepared |
+| **Demo Video Included** | ✅ | Recorded and linked in repository (`Shadow-KYC_Level2_Demo_Final.mp4`) |
+| **Minimum 15 Commits** | ✅ | Repository has 38+ meaningful, descriptive commits |
+| **No Committed Secrets** | ✅ | Clean `.gitignore` ignoring all `.env*`, keys, and sync databases |
 
 ---
 
@@ -359,10 +378,11 @@ shadow-kyc/
 
 **Samruddhi Nevse**
 
-GitHub: [https://github.com/Samruddhi2805](https://github.com/Samruddhi2805)
+- **GitHub**: [@Samruddhi2805](https://github.com/Samruddhi2805)
+- **Project**: Shadow-KYC — Zero-Knowledge Privacy Compliance on Midnight
 
 ---
 
 ## 📜 License
 
-This project is licensed under the MIT License.
+This project is licensed under the [MIT License](./LICENSE).
