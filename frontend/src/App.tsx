@@ -394,7 +394,7 @@ function App() {
       globalConnectedWallet = connectedWalletObj;
 
       // Join the deployed smart contract on Preprod
-      const contractAddress = status?.contractAddress || import.meta.env.VITE_CONTRACT_ADDRESS;
+      const contractAddress = status?.contractAddress || import.meta.env.VITE_CONTRACT_ADDRESS || '1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0';
       if (contractAddress && contractAddress !== '') {
         try {
           const result = await joinContract(walletApi, finalAddress, contractAddress);
@@ -1451,17 +1451,20 @@ function Overview({
           <div>
             <dt>Contract Address</dt>
             <dd className="mono">
-              {status?.contractAddress ? (
-                <span
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => onCopy(status.contractAddress, 'Contract Address')}
-                  title="Click to copy"
-                >
-                  {shortHex(status.contractAddress, 16, 12)} 📋
-                </span>
-              ) : (
-                '—'
-              )}
+              {(() => {
+                const addr = status?.contractAddress || import.meta.env.VITE_CONTRACT_ADDRESS || '1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0';
+                return addr ? (
+                  <span
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => onCopy(addr, 'Contract Address')}
+                    title="Click to copy"
+                  >
+                    {shortHex(addr, 16, 12)} 📋
+                  </span>
+                ) : (
+                  '—'
+                );
+              })()}
             </dd>
           </div>
           <div>

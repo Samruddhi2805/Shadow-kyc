@@ -16,7 +16,10 @@ import type {
 
 export const API_BASE =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/+$/, '') ||
-  (import.meta.env.DEV ? '/api' : '');
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.DEV || (typeof window !== 'undefined' && window.location.hostname === 'localhost')
+    ? '/api'
+    : 'https://weekend-ict-environment-prediction.trycloudflare.com/api');
 const BASE = API_BASE;
 
 async function request<T>(path: string, init?: RequestInit & { timeout?: number }): Promise<T> {
