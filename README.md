@@ -287,7 +287,7 @@ Open [http://localhost:5173](http://localhost:5173) in your browser.
 | **Live Frontend Demo** | [https://shadow-kyc.vercel.app/](https://shadow-kyc.vercel.app/) |
 | **GitHub Repository** | [https://github.com/Samruddhi2805/Shadow-kyc](https://github.com/Samruddhi2805/Shadow-kyc) |
 | **Midnight Preprod Contract** | `1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0` |
-| **Product X (Twitter) Profile** | [@ShadowKYC_ZK](https://x.com/ShadowKYC_ZK) |
+| **Product X (Twitter) Profile** | [@sam0x28](https://x.com/sam0x28) |
 | **Demo Video** | [`Shadow-KYC_Level2_Demo_Final.mp4`](./Shadow-KYC_Level2_Demo_Final.mp4) |
 
 ---
@@ -312,14 +312,14 @@ Workflow file: [`.github/workflows/ci.yml`](./.github/workflows/ci.yml)
 
 Shadow-KYC's public presence on X communicates the paradigm shift from centralized KYC surveillance to zero-knowledge privacy compliance:
 
-- **Handle**: [@ShadowKYC_ZK](https://x.com/ShadowKYC_ZK)
+- **Handle**: [@sam0x28](https://x.com/sam0x28)
 - **Profile Name**: `Shadow-KYC | ZK Compliance on Midnight`
 - **Bio**: `Zero-Knowledge Privacy Compliance & KYC on @MidnightNtwrk. Prove regulatory eligibility without exposing personal identity. Live on Midnight Preprod.`
 
 ### Post 1: The Vision & Problem
 > Traditional KYC is broken. Centralized databases hoard your passports, utility bills, and IDs—turning ordinary users into targets for catastrophic data breaches.
 > 
-> Introducing @ShadowKYC_ZK: Zero-Knowledge Privacy Compliance built on @MidnightNtwrk.
+> Introducing Shadow-KYC: Zero-Knowledge Privacy Compliance built on @MidnightNtwrk.
 > 
 > Prove you are compliant without revealing who you are. 🛡️🔐 #MidnightNetwork #ZeroKnowledge #Web3Security #BlockchainPrivacy
 
