@@ -468,11 +468,21 @@ async function handleRequest(
     return;
   }
 
-  // Proxy for the ZK proof server: /api/prover/* -> http://127.0.0.1:6300/*
+  // Proxy for the ZK proof server: /api/prover/* -> proof-server/*
   if (pathname.startsWith('/api/prover/')) {
     const targetPath = pathname.replace('/api/prover/', '');
     console.log(`  🔄 Proxying proving request to proof-server: /${targetPath}`);
     
+    let proofServerHost = '127.0.0.1';
+    let proofServerPort = 6300;
+    try {
+      const parsedUrl = new URL(networkConfig.proofServer);
+      proofServerHost = parsedUrl.hostname;
+      proofServerPort = Number(parsedUrl.port) || (parsedUrl.protocol === 'https:' ? 443 : 80);
+    } catch {
+      // fallback to 127.0.0.1:6300
+    }
+
     const chunks: Buffer[] = [];
     req.on('data', (chunk) => chunks.push(chunk as Buffer));
     req.on('end', () => {
@@ -480,8 +490,8 @@ async function handleRequest(
       
       const proxyReq = http.request(
         {
-          host: '127.0.0.1',
-          port: 6300,
+          host: proofServerHost,
+          port: proofServerPort,
           path: `/${targetPath}`,
           method: req.method,
           headers: {

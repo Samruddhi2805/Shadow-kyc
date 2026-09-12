@@ -92,4 +92,6 @@ export interface TxModalProgressState {
   blockHeight?: number;
   message?: string;
   error?: string;
+  errorCategory?: string;
+  recoveryTip?: string;
 }

@@ -218,17 +218,56 @@ Copy `.env.example` to create your local `.env`:
 cp .env.example .env
 ```
 
-| Variable | Description | Example |
-| :--- | :--- | :--- |
-| `NETWORK` | Target Midnight network (`preprod`, `preview`, or `undeployed`) | `preprod` |
-| `VITE_NETWORK` | Frontend target network identifier | `preprod` |
-| `CONTRACT_ADDRESS` | Deployed Midnight Compact contract address (64 hex characters) | `1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0` |
-| `VITE_CONTRACT_ADDRESS`| Frontend smart contract address | `1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0` |
-| `MIDNIGHT_INDEXER_URL` | Preprod GraphQL indexer endpoint | `https://indexer.preprod.midnight.network/api/v4/graphql` |
-| `MIDNIGHT_NODE_URL` | Preprod Node RPC endpoint | `https://rpc.preprod.midnight.network` |
-| `MIDNIGHT_PROOF_SERVER_URL` | Local ZK proof server URL | `http://127.0.0.1:6300` |
+| Variable | Target | Description | Example / Default |
+| :--- | :--- | :--- | :--- |
+| `NETWORK` | Backend | Target Midnight network (`preprod`, `preview`, or `undeployed`) | `preprod` |
+| `VITE_NETWORK` | Frontend | Target network identifier for frontend and Lace connector | `preprod` |
+| `CONTRACT_ADDRESS` | Backend | Midnight Compact contract address on Preprod | `1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0` |
+| `VITE_CONTRACT_ADDRESS`| Frontend | Midnight contract address for client-side state resolution | `1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0` |
+| `VITE_API_BASE_URL` | Frontend | Permanent HTTPS API endpoint URL (set in Vercel settings) | `https://your-backend-domain/api` (or `/api` in dev) |
+| `MIDNIGHT_INDEXER_URL` | Backend | Preprod GraphQL indexer endpoint | `https://indexer.preprod.midnight.network/api/v4/graphql` |
+| `MIDNIGHT_NODE_URL` | Backend | Preprod Node RPC endpoint | `https://rpc.preprod.midnight.network` |
+| `MIDNIGHT_PROOF_SERVER_URL` | Backend | ZK Proof Server URL (default container port :6300) | `http://127.0.0.1:6300` |
 
 > 🔒 **Security Notice:** Never commit `.env` or `.env.local` files containing secrets, seed phrases, or private keys to version control.
+
+---
+
+## 🚀 Production Deployment Architecture
+
+```text
+Vercel Frontend (https://shadow-kyc.vercel.app/)
+        │
+        ▼ HTTPS (VITE_API_BASE_URL)
+Permanent Backend API Server (:8080)
+        │
+        ├──► Midnight Preprod Node (https://rpc.preprod.midnight.network)
+        ├──► Midnight Preprod Indexer (https://indexer.preprod.midnight.network)
+        └──► Midnight Proof Server (midnightntwrk/proof-server:8.1.0 on :6300)
+```
+
+### 1. Frontend (Vercel)
+The React/Vite frontend builds directly to `frontend/dist` using `npm --prefix frontend run build`.
+- Set `VITE_API_BASE_URL` in **Vercel Project Settings > Environment Variables** to your permanent HTTPS backend API URL.
+- Pre-compiled contract artifacts reside in [`contracts/managed/shadow-kyc/`](./contracts/managed/shadow-kyc/) and are statically bundled into `frontend/public/`.
+
+### 2. Permanent Backend API & Proof Server (Docker)
+Deploy the permanent backend on any container platform (Railway, Render, Fly.io, DigitalOcean, or VPS):
+
+```bash
+# Start both the ZK Proof Server and Shadow-KYC API Gateway
+docker compose -f docker-compose.prod.yml up -d
+```
+
+### 3. Verify the Deployed API
+Test endpoints directly:
+```bash
+# Check server & network status:
+curl -s https://your-backend-domain/api/status
+
+# Check on-chain ledger state:
+curl -s https://your-backend-domain/api/state
+```
 
 ---
 

@@ -1,0 +1,40 @@
+# Production Compose Stack for Shadow-KYC Backend
+# Deploys the permanent API gateway alongside the Midnight ZK Proof Server.
+# Run on any VPS or container host:
+#   docker compose -f docker-compose.prod.yml up -d
+name: shadow-kyc-production
+
+services:
+  proof-server:
+    image: midnightntwrk/proof-server:8.1.0
+    container_name: shadow-kyc-proof-server
+    restart: unless-stopped
+    command: ["midnight-proof-server -v"]
+    ports:
+      - "6300:6300"
+    environment:
+      RUST_BACKTRACE: "full"
+    healthcheck:
+      test: ["CMD-SHELL", "echo > /dev/tcp/127.0.0.1/6300"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shadow-kyc-api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      NETWORK: preprod
+      CONTRACT_ADDRESS: 1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0
+      MIDNIGHT_PROOF_SERVER_URL: http://proof-server:6300
+    depends_on:
+      proof-server:
+        condition: service_healthy

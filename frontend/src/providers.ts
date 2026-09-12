@@ -28,12 +28,15 @@ export async function initializeClientProviders(
   // Set the indexer and prover endpoints dynamically from the connected wallet
   const indexerUri = config.indexerUri;
   const indexerWsUri = config.indexerWsUri;
-  // Use the same backend origin as the API client (Cloudflare tunnel when on Vercel, or local proxy)
-  const base =
+  // Route ZK proving requests through the permanent backend API gateway (/api/prover)
+  // or a dedicated proof server URL if configured via VITE_PROVER_URL
+  const defaultProverBase =
     API_BASE.startsWith('http://') || API_BASE.startsWith('https://')
       ? API_BASE.replace(/\/api\/?$/, '')
-      : `${window.location.origin}${API_BASE.replace(/\/api\/?$/, '')}`;
-  const proverServerUri = `${base}/api/prover`;
+      : (typeof window !== 'undefined' ? `${window.location.origin}${API_BASE.replace(/\/api\/?$/, '')}` : '');
+  const proverServerUri =
+    (import.meta.env.VITE_PROVER_URL as string | undefined)?.replace(/\/+$/, '') ||
+    `${defaultProverBase}/api/prover`;
 
   console.log(`[Providers] Target Network: ${networkId}`);
   console.log(`[Providers] Indexer URI:    ${indexerUri}`);

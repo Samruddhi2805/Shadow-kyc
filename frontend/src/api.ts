@@ -16,20 +16,31 @@ import type {
 
 export const API_BASE =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/+$/, '') ||
-  import.meta.env.VITE_API_URL ||
-  (import.meta.env.DEV || (typeof window !== 'undefined' && window.location.hostname === 'localhost')
-    ? '/api'
-    : 'https://weekend-ict-environment-prediction.trycloudflare.com/api');
+  (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, '') ||
+  '/api';
 const BASE = API_BASE;
 
 async function request<T>(path: string, init?: RequestInit & { timeout?: number }): Promise<T> {
-  const timeoutMs = init?.timeout ?? (init?.method === 'POST' ? 120000 : 5000);
+  const timeoutMs = init?.timeout ?? (init?.method === 'POST' ? 120000 : 8000);
   const { timeout, ...fetchInit } = init || {};
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    signal: AbortSignal.timeout(timeoutMs),
-    ...fetchInit,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(timeoutMs),
+      ...fetchInit,
+    });
+  } catch (err: any) {
+    if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+      throw new Error(`API request timed out after ${timeoutMs / 1000}s (${path}). The backend may be processing a ZK transaction or is unreachable.`);
+    }
+    if (err instanceof TypeError && /failed to fetch/i.test(err.message)) {
+      throw new Error(
+        `Shadow-KYC API unreachable at ${BASE}${path}. Please verify that the permanent backend API is active and CORS is enabled.`
+      );
+    }
+    throw err;
+  }
 
   let body: unknown = null;
   try {

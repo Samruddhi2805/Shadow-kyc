@@ -552,6 +552,27 @@ function App() {
     return () => window.clearInterval(id)
   }, [])
 
+  const [userCommitment, setUserCommitment] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (connectedWallet?.address) {
+      void getDeterministicSecret(connectedWallet.address).then(async (secret) => {
+        const comm = await computeRealCommitment(secret);
+        setUserCommitment(comm);
+      });
+    } else {
+      setUserCommitment(null);
+    }
+  }, [connectedWallet?.address]);
+
+  const userCredentialStatus = useMemo<'none' | 'pending' | 'approved' | 'revoked'>(() => {
+    if (!state || !userCommitment) return 'none';
+    if (state.revokedCredentials.includes(userCommitment)) return 'revoked';
+    if (state.credentials.includes(userCommitment)) return 'approved';
+    if (state.pendingCredentials.includes(userCommitment)) return 'pending';
+    return 'none';
+  }, [state, userCommitment]);
+
   const runTxWithModal = useCallback(
     async (
       action: TxModalProgressState['action'],
@@ -627,21 +648,65 @@ function App() {
         }
         
         let errMsg = details.join(' | ') || String(err);
-        
-        // Handle dust error with a friendly explanation
+        let errorCategory = 'Transaction Error';
+        let recoveryTip = '';
+
+        // Classify errors for production-safe user feedback
         const isDustError = 
           /could not balance dust/i.test(errMsg) || 
           /Wallet\.InsufficientFunds/i.test(errMsg) || 
           (err?.cause?.failure?.message && /could not balance dust/i.test(err.cause.failure.message));
-          
+
+        const isProverError =
+          /'check' returned an error/i.test(errMsg) ||
+          /'prove' returned an error/i.test(errMsg) ||
+          /prover.*failed to fetch/i.test(errMsg) ||
+          (/failed to fetch/i.test(errMsg) && (errMsg.includes('prover') || errMsg.includes('check') || errMsg.includes('proof')));
+
+        const isApiOffline =
+          /api unreachable/i.test(errMsg) ||
+          /Shadow-KYC API unreachable/i.test(errMsg) ||
+          (/failed to fetch/i.test(errMsg) && !isProverError);
+
+        const isCancelled =
+          /user rejected|user cancelled|user denied|declined/i.test(errMsg);
+
+        const isTimeout =
+          /timed out/i.test(errMsg);
+
         if (isDustError) {
-          errMsg = "Insufficient DUST balance in Lace Wallet! DUST is required to cover ZK transaction fees. Please open your Lace Wallet extension, select the Midnight tab, click 'Generate DUST' (or register your NIGHT tokens), and wait a few blocks for DUST generation.";
+          errorCategory = 'Lace DUST Balance Required';
+          errMsg = "Insufficient DUST in Lace Wallet. Midnight transactions require DUST to cover zero-knowledge circuit verification fees.";
+          recoveryTip = "Open Lace Wallet, go to the Midnight tab, click 'Generate DUST' (or register your NIGHT tokens), and wait 1-2 blocks.";
+        } else if (isProverError) {
+          errorCategory = 'ZK Proof Server Unreachable';
+          errMsg = "The transaction could not connect to the Midnight ZK Proof Server (:6300).";
+          recoveryTip = "Ensure the Midnight Proof Server is running via Docker ('docker compose -f docker-compose.prod.yml up -d') or verify the backend prover gateway is deployed.";
+        } else if (isApiOffline) {
+          errorCategory = 'Backend API Offline';
+          errMsg = "Could not connect to the Shadow-KYC backend API.";
+          recoveryTip = "Verify your internet connection and ensure the permanent backend API is deployed and configured via VITE_API_BASE_URL.";
+        } else if (isCancelled) {
+          errorCategory = 'Transaction Cancelled';
+          errMsg = "The transaction signing request was declined or cancelled in your wallet.";
+          recoveryTip = "Re-try the transaction and approve the signature prompt in Lace Wallet.";
+        } else if (isTimeout) {
+          errorCategory = 'Transaction Timeout';
+          errMsg = "The ZK transaction took longer than expected.";
+          recoveryTip = "Zero-knowledge proofs can take 30-60s on complex circuits. Please check your network and try again.";
+        } else if (/Insufficient tNIGHT/i.test(errMsg)) {
+          errorCategory = 'Insufficient tNIGHT';
+          recoveryTip = "Request 20 tNIGHT using the faucet button in the header or visit the Midnight Preprod testnet faucet.";
         }
-        
-        // Contract assertion errors (409) are warnings, not fatal errors
-        const isWarning = isDustError || errMsg.includes('Please wait') || errMsg.includes('already') || errMsg.includes('Only the') || errMsg.includes('does not match') || errMsg.includes('not been approved') || errMsg.includes('been revoked') || errMsg.includes('No pending')
+
+        // Contract assertion errors (409) are warnings, not fatal crashes
+        const isWarning = isDustError || isCancelled || errMsg.includes('Please wait') || errMsg.includes('already') || errMsg.includes('Only the') || errMsg.includes('does not match') || errMsg.includes('not been approved') || errMsg.includes('been revoked') || errMsg.includes('No pending');
+        if (isWarning && !isDustError && !isCancelled) {
+          errorCategory = 'Contract Policy Notice';
+        }
+
         setTxProgress((prev) =>
-          prev ? { ...prev, step: 'error', error: errMsg } : null
+          prev ? { ...prev, step: 'error', error: errMsg, errorCategory, recoveryTip } : null
         )
         showToast(isWarning ? 'info' : 'error', errMsg)
       } finally {
@@ -1032,7 +1097,10 @@ function App() {
             credentials={credentials}
             balance={balance}
             connectedWallet={connectedWallet}
+            userCommitment={userCommitment}
+            userCredentialStatus={userCredentialStatus}
             onCopy={copyToClipboard}
+            onNavigateUser={() => setActiveTab('user')}
           />
         )}
 
@@ -1041,6 +1109,8 @@ function App() {
             busy={busy}
             credentials={credentials}
             connectedWallet={connectedWallet}
+            userCommitment={userCommitment}
+            userCredentialStatus={userCredentialStatus}
             commitmentInput={commitmentInput}
             setCommitmentInput={setCommitmentInput}
             onIssue={handleIssue}
@@ -1213,34 +1283,54 @@ function App() {
 
             <div className="tx-steps-container">
               <div className={`tx-step-card ${txProgress.step === 'witness' ? 'active' : ['proving', 'signing', 'confirming', 'done'].includes(txProgress.step) ? 'done' : ''}`}>
-                <div className="tx-step-icon">1</div>
+                <div className="tx-step-icon">
+                  {['proving', 'signing', 'confirming', 'done'].includes(txProgress.step) ? '✓' : '1'}
+                </div>
                 <div className="tx-step-info">
-                  <span className="tx-step-name">Local Secret Witness</span>
-                  <span className="tx-step-desc">Generating SHA-256 identity commitment (never revealed on-chain)</span>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                    <span className="tx-step-name">Local Secret Witness</span>
+                    <span className="tx-step-badge" style={{ fontSize: 11, padding: '2px 8px', borderRadius: 999, background: 'rgba(139, 92, 246, 0.15)', color: '#c4b5fd' }}>🔒 In-Memory Private</span>
+                  </div>
+                  <span className="tx-step-desc">Generating identity witness & SHA-256 commitment (secret never leaves device)</span>
                 </div>
               </div>
 
               <div className={`tx-step-card ${txProgress.step === 'proving' ? 'active' : ['signing', 'confirming', 'done'].includes(txProgress.step) ? 'done' : ''}`}>
-                <div className="tx-step-icon">2</div>
+                <div className="tx-step-icon">
+                  {['signing', 'confirming', 'done'].includes(txProgress.step) ? '✓' : '2'}
+                </div>
                 <div className="tx-step-info">
-                  <span className="tx-step-name">Zero-Knowledge Proof (ZKP)</span>
-                  <span className="tx-step-desc">Executing Compact circuit proof on Midnight Proof Server</span>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                    <span className="tx-step-name">Zero-Knowledge Proof (ZKP)</span>
+                    <span className="tx-step-badge" style={{ fontSize: 11, padding: '2px 8px', borderRadius: 999, background: 'rgba(16, 185, 129, 0.15)', color: '#6ee7b7' }}>🛡️ Zero PII Revealed</span>
+                  </div>
+                  <span className="tx-step-desc">Evaluating Compact circuit to mathematically prove eligibility without revealing secret</span>
                 </div>
               </div>
 
               <div className={`tx-step-card ${txProgress.step === 'signing' ? 'active' : ['confirming', 'done'].includes(txProgress.step) ? 'done' : ''}`}>
-                <div className="tx-step-icon">3</div>
+                <div className="tx-step-icon">
+                  {['confirming', 'done'].includes(txProgress.step) ? '✓' : '3'}
+                </div>
                 <div className="tx-step-info">
-                  <span className="tx-step-name">Wallet Signature</span>
-                  <span className="tx-step-desc">Authenticating transaction with connected Midnight wallet</span>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                    <span className="tx-step-name">Wallet Signature & Fee Balancing</span>
+                    <span className="tx-step-badge" style={{ fontSize: 11, padding: '2px 8px', borderRadius: 999, background: 'rgba(56, 189, 248, 0.15)', color: '#7dd3fc' }}>✍️ Non-Custodial</span>
+                  </div>
+                  <span className="tx-step-desc">Balancing unshielded fees (tNIGHT + DUST) and signing transaction via Lace Wallet</span>
                 </div>
               </div>
 
               <div className={`tx-step-card ${txProgress.step === 'confirming' || txProgress.step === 'done' ? (txProgress.step === 'done' ? 'done' : 'active') : ''}`}>
-                <div className="tx-step-icon">4</div>
+                <div className="tx-step-icon">
+                  {txProgress.step === 'done' ? '✓' : '4'}
+                </div>
                 <div className="tx-step-info">
-                  <span className="tx-step-name">Ledger Block Inclusion</span>
-                  <span className="tx-step-desc">Broadcasting to Midnight Network node & storing commitment</span>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                    <span className="tx-step-name">Ledger Block Inclusion</span>
+                    <span className="tx-step-badge" style={{ fontSize: 11, padding: '2px 8px', borderRadius: 999, background: 'rgba(245, 158, 11, 0.15)', color: '#fcd34d' }}>⛓️ Midnight Preprod</span>
+                  </div>
+                  <span className="tx-step-desc">Transaction included in block; commitment recorded on-chain</span>
                 </div>
               </div>
             </div>
@@ -1283,16 +1373,36 @@ function App() {
                 txProgress.error.includes('does not match') ||
                 txProgress.error.includes('not been approved') ||
                 txProgress.error.includes('been revoked') ||
-                txProgress.error.includes('No pending')
+                txProgress.error.includes('No pending') ||
+                txProgress.errorCategory === 'Contract Policy Notice' ||
+                txProgress.errorCategory === 'Transaction Cancelled'
               )
               return (
                 <div className="wallet-pop-details" style={{
                   borderColor: isWarning ? 'var(--amber, #f59e0b)' : 'var(--rose-border)',
                   background: isWarning ? 'rgba(245, 158, 11, 0.08)' : 'rgba(244, 63, 94, 0.08)'
                 }}>
-                  <p style={{ margin: 0, fontWeight: 600, color: isWarning ? '#f59e0b' : 'var(--rose)', fontSize: 14 }}>
-                    {isWarning ? '⚠️' : '❌'} {isWarning ? '' : 'Transaction Error: '}{txProgress.error}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                    <span style={{ fontSize: 16 }}>{isWarning ? '⚠️' : '❌'}</span>
+                    <strong style={{ color: isWarning ? '#f59e0b' : 'var(--rose)', fontSize: 14 }}>
+                      {txProgress.errorCategory || (isWarning ? 'Notice' : 'Transaction Error')}
+                    </strong>
+                  </div>
+                  <p style={{ margin: '0 0 8px 0', color: 'var(--text-h)', fontSize: 13, lineHeight: 1.5 }}>
+                    {txProgress.error}
                   </p>
+                  {txProgress.recoveryTip && (
+                    <div style={{
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      background: 'rgba(0, 0, 0, 0.3)',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      fontSize: '12px',
+                      color: 'var(--accent-light)',
+                    }}>
+                      💡 <strong>Recommended Action:</strong> {txProgress.recoveryTip}
+                    </div>
+                  )}
                 </div>
               )
             })()}
@@ -1324,14 +1434,20 @@ function Overview({
   credentials,
   balance,
   connectedWallet,
+  userCommitment,
+  userCredentialStatus,
   onCopy,
+  onNavigateUser,
 }: {
   status: ServerStatus | null
   state: ContractState | null
   credentials: CredentialEntry[]
   balance: BalanceInfo | null
   connectedWallet: ConnectedWalletInfo | null
+  userCommitment: string | null
+  userCredentialStatus: 'none' | 'pending' | 'approved' | 'revoked'
   onCopy: (text: string, label: string) => void
+  onNavigateUser?: () => void
 }) {
   const pending = credentials.filter((c) => c.status === 'pending').length
   const approved = credentials.filter((c) => c.status === 'approved').length
@@ -1346,6 +1462,62 @@ function Overview({
 
   return (
     <div className="overview">
+      {connectedWallet && (
+        <section className="card user-credential-card" style={{
+          borderLeft: `4px solid ${
+            userCredentialStatus === 'approved' ? 'var(--emerald)' :
+            userCredentialStatus === 'pending' ? '#f59e0b' :
+            userCredentialStatus === 'revoked' ? 'var(--rose)' : 'var(--accent)'
+          }`
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 14 }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                <span style={{ fontSize: 20 }}>
+                  {userCredentialStatus === 'approved' ? '🛡️' :
+                   userCredentialStatus === 'pending' ? '⏳' :
+                   userCredentialStatus === 'revoked' ? '🚫' : '🆔'}
+                </span>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>My KYC Verification Status</h3>
+                <span className={`pill ${
+                  userCredentialStatus === 'approved' ? 'pill-ok' :
+                  userCredentialStatus === 'pending' ? 'pill-warn' :
+                  userCredentialStatus === 'revoked' ? 'pill-err' : 'pill-neutral'
+                }`}>
+                  {userCredentialStatus === 'approved' ? 'Approved & Compliant' :
+                   userCredentialStatus === 'pending' ? 'Awaiting Authority Approval' :
+                   userCredentialStatus === 'revoked' ? 'Revoked' : 'Not Requested'}
+                </span>
+              </div>
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--text)' }}>
+                {userCredentialStatus === 'approved' ? 'Your identity commitment is active on Midnight Preprod. You can generate zero-knowledge eligibility proofs without revealing your identity.' :
+                 userCredentialStatus === 'pending' ? 'Your credential request has been committed on-chain. Waiting for the KYC authority to verify and approve your commitment.' :
+                 userCredentialStatus === 'revoked' ? 'This credential commitment was revoked and cannot be used for compliant operations.' :
+                 'Your wallet currently has no active KYC credential on Midnight Preprod. Request one in the User Actions tab.'}
+              </p>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              {userCommitment && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(0,0,0,0.3)', padding: '6px 10px', borderRadius: 8 }}>
+                  <span className="mono" style={{ fontSize: 12, color: 'var(--accent-light)' }}>
+                    {shortHex(userCommitment, 8, 6)}
+                  </span>
+                  <button className="btn btn-icon" onClick={() => onCopy(userCommitment, 'Your Commitment')} title="Copy your derived commitment">📋</button>
+                </div>
+              )}
+              {onNavigateUser && (
+                <button
+                  className={`btn btn-small ${userCredentialStatus === 'approved' ? 'btn-secondary' : 'btn-primary'}`}
+                  onClick={onNavigateUser}
+                >
+                  {userCredentialStatus === 'approved' ? '⚡ Prove Eligibility' : '➕ Go to User Actions'}
+                </button>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+
       <section className="card hero-card">
         <h2>Zero-Knowledge Privacy Compliance Protocol</h2>
         <p>
@@ -1528,6 +1700,8 @@ function UserActions({
   busy,
   credentials,
   connectedWallet,
+  userCommitment,
+  userCredentialStatus,
   commitmentInput,
   setCommitmentInput,
   onIssue,
@@ -1538,6 +1712,8 @@ function UserActions({
   busy: string | null
   credentials: CredentialEntry[]
   connectedWallet: ConnectedWalletInfo | null
+  userCommitment: string | null
+  userCredentialStatus: 'none' | 'pending' | 'approved' | 'revoked'
   commitmentInput: string
   setCommitmentInput: (v: string) => void
   onIssue: () => void
@@ -1549,12 +1725,73 @@ function UserActions({
 
   return (
     <div className="actions">
+      {connectedWallet && (
+        <section className="card user-credential-card" style={{
+          borderLeft: `4px solid ${
+            userCredentialStatus === 'approved' ? 'var(--emerald)' :
+            userCredentialStatus === 'pending' ? '#f59e0b' :
+            userCredentialStatus === 'revoked' ? 'var(--rose)' : 'var(--accent)'
+          }`
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                <span style={{ fontSize: 18 }}>
+                  {userCredentialStatus === 'approved' ? '🛡️' :
+                   userCredentialStatus === 'pending' ? '⏳' :
+                   userCredentialStatus === 'revoked' ? '🚫' : '🆔'}
+                </span>
+                <h3 style={{ margin: 0, fontSize: 16 }}>My Credential Status</h3>
+                <span className={`pill ${
+                  userCredentialStatus === 'approved' ? 'pill-ok' :
+                  userCredentialStatus === 'pending' ? 'pill-warn' :
+                  userCredentialStatus === 'revoked' ? 'pill-err' : 'pill-neutral'
+                }`}>
+                  {userCredentialStatus === 'approved' ? 'Approved & Ready' :
+                   userCredentialStatus === 'pending' ? 'Pending Approval' :
+                   userCredentialStatus === 'revoked' ? 'Revoked' : 'Not Requested'}
+                </span>
+              </div>
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--text-s)' }}>
+                {userCredentialStatus === 'approved' ? 'Your credential is active. Click "Prove Eligibility" below to generate a zero-knowledge proof.' :
+                 userCredentialStatus === 'pending' ? 'Your request has been submitted on-chain. Waiting for the compliance authority to approve it.' :
+                 userCredentialStatus === 'revoked' ? 'This credential commitment was revoked.' :
+                 'No credential found for this wallet. Request one using Step 1 below.'}
+              </p>
+            </div>
+            {userCommitment && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(0,0,0,0.3)', padding: '6px 10px', borderRadius: 8 }}>
+                <span className="mono" style={{ fontSize: 12, color: 'var(--accent-light)' }}>
+                  {shortHex(userCommitment, 8, 6)}
+                </span>
+                <button className="btn btn-icon" onClick={() => onCopy(userCommitment, 'Your Commitment')} title="Copy your derived commitment">📋</button>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
       <section className="card">
         <h2>1. Request a KYC/AML Credential</h2>
         <p>
           Submit a new credential request to the compliance authority. Your identity secret is hashed
           into a commitment stored in <code className="mono">pendingCredentials</code>.
         </p>
+        <div style={{
+          padding: '10px 14px',
+          borderRadius: '8px',
+          background: 'rgba(139, 92, 246, 0.08)',
+          border: '1px solid rgba(139, 92, 246, 0.2)',
+          marginBottom: '16px',
+          fontSize: '13px',
+          color: 'var(--accent-light)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px'
+        }}>
+          <span>🔒</span>
+          <span><strong>Privacy Guarantee:</strong> Your secret witness stays 100% in local memory. Only the 32-byte cryptographic commitment is submitted on-chain.</span>
+        </div>
         {connectedWallet && (
           <p style={{ fontSize: '13px', color: 'var(--emerald)', marginBottom: '14px' }}>
             💳 Connected as <strong>{connectedWallet.name}</strong> ({shortHex(connectedWallet.address, 8, 6)}). Request will be bound to your wallet commitment!
@@ -1593,6 +1830,9 @@ function UserActions({
               <li key={c.commitment} className="credential-item status-approved">
                 <span className="status-dot" />
                 <span className="mono">{shortHex(c.commitment, 18, 14)}</span>
+                {userCommitment === c.commitment && (
+                  <span className="pill pill-ok" style={{ fontSize: 11, padding: '2px 8px' }}>Your Credential</span>
+                )}
                 <button
                   className="btn btn-icon"
                   onClick={() => onCopy(c.commitment, 'Commitment')}
@@ -1612,7 +1852,7 @@ function UserActions({
           </ul>
         )}
 
-        <div className="inline-form">
+        <div className="inline-form" style={{ marginTop: '18px' }}>
           <input
             type="text"
             placeholder="Paste a 64-character hex commitment string…"
