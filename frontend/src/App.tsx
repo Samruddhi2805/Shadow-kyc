@@ -592,7 +592,7 @@ function App() {
     }
   }, [connectedWallet?.address]);
 
-  const effectiveState = isSandbox ? sandboxState : (state ?? sandboxState);
+  const effectiveState = isSandbox ? sandboxState : state;
 
   const userCredentialStatus = useMemo<'none' | 'pending' | 'approved' | 'revoked'>(() => {
     if (!effectiveState || !userCommitment) return 'none';
@@ -1316,6 +1316,7 @@ function App() {
             userCredentialStatus={userCredentialStatus}
             onCopy={copyToClipboard}
             onNavigateUser={() => setActiveTab('user')}
+            isSandbox={isSandbox}
           />
         )}
 
@@ -1668,6 +1669,7 @@ function Overview({
   userCredentialStatus,
   onCopy,
   onNavigateUser,
+  isSandbox,
 }: {
   status: ServerStatus | null
   state: ContractState | null
@@ -1678,6 +1680,7 @@ function Overview({
   userCredentialStatus: 'none' | 'pending' | 'approved' | 'revoked'
   onCopy: (text: string, label: string) => void
   onNavigateUser?: () => void
+  isSandbox: boolean
 }) {
   const pending = credentials.filter((c) => c.status === 'pending').length
   const approved = credentials.filter((c) => c.status === 'approved').length
@@ -1708,6 +1711,26 @@ function Overview({
 
   return (
     <div className="overview">
+      {!isSandbox && !state && (
+        <div style={{
+          marginBottom: 16,
+          padding: '12px 16px',
+          borderRadius: 8,
+          background: 'rgba(56, 189, 248, 0.08)',
+          border: '1px solid rgba(56, 189, 248, 0.2)',
+          color: 'var(--accent-light)',
+          fontSize: 13,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+        }}>
+          <span>🌐</span>
+          <span>
+            <strong>Midnight Preprod Mode:</strong> Live on-chain contract state is loading from the Midnight network (Contract <code className="mono">1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0</code>). Connect Lace Wallet or deploy the permanent API backend to submit on-chain transactions.
+          </span>
+        </div>
+      )}
+
       {/* ── 1. Live Metrics Bar ── */}
       <div className="metrics-grid">
         <div className="metric-card purple">
@@ -1715,7 +1738,7 @@ function Overview({
             <div>
               <div className="metric-label">Total KYC Passports</div>
               <div className="metric-value">{credentials.length}</div>
-              <div className="metric-sub">Across All Registries</div>
+              <div className="metric-sub">{isSandbox ? 'Across Sandbox Registries' : (state ? 'On-Chain Ledger State' : 'Connecting to Preprod...')}</div>
             </div>
             <div className="metric-icon-wrap">🛡️</div>
           </div>
@@ -1747,7 +1770,7 @@ function Overview({
           <div className="metric-card-inner">
             <div>
               <div className="metric-label">ZK Proofs Verified</div>
-              <div className="metric-value">{state ? formatCount(state.eligibilityCount) : '48'}</div>
+              <div className="metric-value">{state ? formatCount(state.eligibilityCount) : (isSandbox ? '48' : '0')}</div>
               <div className="metric-sub">⚡ Zero Knowledge Leaked</div>
             </div>
             <div className="metric-icon-wrap">🔒</div>
@@ -1979,7 +2002,7 @@ function Overview({
         <dl className="stat-grid">
           <div>
             <dt>Authority Name</dt>
-            <dd>{state?.authorityName ?? 'Midnight KYC Authority (Preprod)'}</dd>
+            <dd>{state?.authorityName ?? (isSandbox ? 'Midnight KYC Authority (Sandbox)' : 'Connecting to Preprod...')}</dd>
           </div>
           <div>
             <dt>Active Network</dt>
@@ -2004,7 +2027,7 @@ function Overview({
           </div>
           <div>
             <dt>Block Reference</dt>
-            <dd className="mono">Block #2126833</dd>
+            <dd className="mono">{isSandbox ? 'Block #2126833 (Simulated)' : (status ? 'Live Preprod Testnet' : 'Connecting to Preprod...')}</dd>
           </div>
         </dl>
         {balance && (
