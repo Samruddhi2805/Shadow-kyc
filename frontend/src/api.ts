@@ -50,9 +50,16 @@ async function request<T>(path: string, init?: RequestInit & { timeout?: number 
   }
 
   if (!res.ok) {
-    const message =
-      (body as ApiError | null)?.error ??
-      `Request failed with status ${res.status}`;
+    let message = (body as ApiError | null)?.error;
+    if (!message) {
+      if (res.status === 405) {
+        message = `API endpoint rejected method (${res.status} Method Not Allowed on ${path}). Ensure permanent backend is deployed and handling POST requests.`;
+      } else if (res.status === 404) {
+        message = `API route not found (${res.status} on ${path}). Ensure permanent API server is running.`;
+      } else {
+        message = `Request failed with status ${res.status}`;
+      }
+    }
     throw new Error(message);
   }
 

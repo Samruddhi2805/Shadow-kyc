@@ -9,9 +9,8 @@ services:
     image: midnightntwrk/proof-server:8.1.0
     container_name: shadow-kyc-proof-server
     restart: unless-stopped
-    command: ["midnight-proof-server -v"]
-    ports:
-      - "6300:6300"
+    expose:
+      - "6300"
     environment:
       RUST_BACKTRACE: "full"
     healthcheck:

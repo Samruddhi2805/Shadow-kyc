@@ -453,12 +453,24 @@ async function handleRequest(
   // CORS — always allow
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
 
-  // CORS preflight for the Vite dev server.
+  // CORS preflight for all endpoints
   if (req.method === 'OPTIONS') {
     res.writeHead(204);
     res.end();
+    return;
+  }
+
+  // Lightweight health check endpoint for container orchestrators (Railway / Docker)
+  if (req.method === 'GET' && (pathname === '/health' || pathname === '/api/health')) {
+    json(res, 200, {
+      status: 'ok',
+      server: 'shadow-kyc-api',
+      network,
+      contractAddress: deployment.address,
+      timestamp: new Date().toISOString(),
+    });
     return;
   }
 

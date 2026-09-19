@@ -161,7 +161,13 @@ function App() {
   const [toast, setToast] = useState<Toast | null>(null)
   const [commitmentInput, setCommitmentInput] = useState('')
   const [activeTab, setActiveTab] = useState<'overview' | 'user' | 'authority' | 'audit'>('overview')
-  const [isSandbox, setIsSandbox] = useState<boolean>(false)
+  const [isSandbox, setIsSandbox] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('sandbox') === 'true' || params.get('mode') === 'sandbox';
+    }
+    return false;
+  })
   const [sandboxState, setSandboxState] = useState<ContractState>({
     authority: '1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0',
     authorityName: 'Midnight KYC Authority (Preprod Verified)',
@@ -542,6 +548,10 @@ function App() {
   }, [showToast])
 
   const refresh = useCallback(async () => {
+    if (isSandbox) {
+      setLoading(false)
+      return
+    }
     try {
       const [s, st] = await Promise.all([
         api.getStatus().catch(() => null),
@@ -561,7 +571,7 @@ function App() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [isSandbox])
 
   useEffect(() => {
     void refresh()
@@ -877,7 +887,7 @@ function App() {
         api.issueCredential(customC)
       )
     }
-  }, [deployedContract, connectedWallet, runTxWithModal])
+  }, [isSandbox, userCommitment, deployedContract, connectedWallet, runTxWithModal])
 
   const handleApprove = useCallback(
     (commitment: string) => {
@@ -1082,6 +1092,37 @@ function App() {
       showToast('error', 'Enter a valid 64-character hex commitment')
       return
     }
+
+    if (isSandbox) {
+      void runTxWithModal('proveEligibility', 'Zero-Knowledge Prove Custom Commitment (Sandbox)', c, async () => {
+        await new Promise((r) => setTimeout(r, 600))
+        setSandboxState((prev) => ({
+          ...prev,
+          eligibilityCount: (Number(prev.eligibilityCount) + 1).toString(),
+        }))
+        const mockTx = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(32))).map((b) => b.toString(16).padStart(2, '0')).join('')
+        setHistory((prev) => [
+          {
+            id: Date.now().toString(),
+            action: 'proveEligibility',
+            txId: mockTx,
+            blockHeight: 2126839,
+            commitment: c,
+            message: 'Zero-Knowledge eligibility proved! Secret never disclosed (Sandbox).',
+            timestamp: new Date().toISOString(),
+          },
+          ...prev,
+        ])
+        return {
+          txId: mockTx,
+          blockHeight: 2126839,
+          commitment: c,
+          message: 'Zero-Knowledge eligibility proved! Secret never disclosed (Sandbox).',
+        }
+      })
+      return
+    }
+
     if (deployedContract && connectedWallet && !connectedWallet.isWebWallet) {
       void runTxWithModal('proveEligibility', 'ZK Prove Custom Commitment (Lace Wallet ZK)', c, async () => {
         console.log('[Lace ZK] Calling proveEligibility circuit for custom commitment:', c);
@@ -1112,7 +1153,7 @@ function App() {
         api.proveEligibility(c)
       )
     }
-  }, [commitmentInput, deployedContract, connectedWallet, runTxWithModal, showToast])
+  }, [isSandbox, commitmentInput, deployedContract, connectedWallet, runTxWithModal, showToast])
 
   if (loading) {
     return (
@@ -1582,7 +1623,7 @@ function App() {
             })()}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 16 }}>
-              {txProgress.step === 'error' && txProgress.action === 'issueCredential' && (
+              {txProgress.step === 'error' && txProgress.action === 'issueCredential' && !isSandbox && (
                 <button
                   className="btn btn-secondary"
                   style={{ background: 'rgba(255, 255, 255, 0.08)', border: '1px solid rgba(255, 255, 255, 0.2)' }}

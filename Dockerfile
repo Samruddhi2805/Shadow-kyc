@@ -19,10 +19,10 @@ RUN npm ci --omit=dev || npm install --omit=dev
 # Copy managed contract artifacts (pre-compiled, do not regenerate)
 COPY contracts/managed ./contracts/managed
 
-# Copy backend source, config, and state
+# Copy backend source, config, and state (optional state file via pattern)
 COPY src ./src
 COPY tsconfig.json .
-COPY .midnight-state.json .
+COPY .midnight-state.jso[n] ./
 
 # Environment defaults for production Preprod
 ENV NODE_ENV=production
@@ -32,6 +32,9 @@ ENV CONTRACT_ADDRESS=1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d537
 ENV MIDNIGHT_PROOF_SERVER_URL=http://proof-server:6300
 
 EXPOSE 8080
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://127.0.0.1:${PORT:-8080}/health || exit 1
 
 # Run API server via tsx
 CMD ["npx", "tsx", "src/api-server.ts"]
