@@ -224,7 +224,7 @@ cp .env.example .env
 | `VITE_NETWORK` | Frontend | Target network identifier for frontend and Lace connector | `preprod` |
 | `CONTRACT_ADDRESS` | Backend | Midnight Compact contract address on Preprod | `1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0` |
 | `VITE_CONTRACT_ADDRESS`| Frontend | Midnight contract address for client-side state resolution | `1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0` |
-| `VITE_API_BASE_URL` | Frontend | Permanent HTTPS API endpoint URL (set in Vercel settings) | `https://your-backend-domain/api` (or `/api` in dev) |
+| `VITE_API_BASE_URL` | Frontend | Optional API endpoint URL for local/Preprod mode | `/api` (default) |
 | `MIDNIGHT_INDEXER_URL` | Backend | Preprod GraphQL indexer endpoint | `https://indexer.preprod.midnight.network/api/v4/graphql` |
 | `MIDNIGHT_NODE_URL` | Backend | Preprod Node RPC endpoint | `https://rpc.preprod.midnight.network` |
 | `MIDNIGHT_PROOF_SERVER_URL` | Backend | ZK Proof Server URL (default container port :6300) | `http://127.0.0.1:6300` |
@@ -233,41 +233,87 @@ cp .env.example .env
 
 ---
 
-## 🚀 Production Deployment Architecture
+## 🚀 Deployment Architecture
+
+Shadow-KYC supports two clearly separated environments:
+
+### Reviewer Sandbox Mode
+
+The public Vercel deployment provides a Reviewer Sandbox Mode for demonstrating the complete Shadow-KYC workflow without requiring a Midnight wallet, tNIGHT, DUST, or a continuously running backend.
 
 ```text
-Vercel Frontend (https://shadow-kyc.vercel.app/)
-        │
-        ▼ HTTPS (VITE_API_BASE_URL)
-Permanent Backend API Server (:8080)
-        │
-        ├──► Midnight Preprod Node (https://rpc.preprod.midnight.network)
-        ├──► Midnight Preprod Indexer (https://indexer.preprod.midnight.network)
-        └──► Midnight Proof Server (midnightntwrk/proof-server:8.1.0 on :6300)
+┌─────────────────────────────────────────────────────────────┐
+│                    PUBLIC REVIEWER DEMO                     │
+│                                                             │
+│                           Vercel                            │
+│         https://shadow-kyc.vercel.app/?sandbox=true         │
+│                                                             │
+│       ┌─────────────────────────────────────────────┐       │
+│       │            React / Vite Frontend            │       │
+│       │                                             │       │
+│       │      • Simulated KYC issuance               │       │
+│       │      • Simulated authority approval         │       │
+│       │      • Simulated ZK eligibility workflow    │       │
+│       │      • Audit history                        │       │
+│       │      • ZK privacy visualization             │       │
+│       └─────────────────────────────────────────────┘       │
+│                                                             │
+│                 No backend or wallet required               │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### 1. Frontend (Vercel)
-The React/Vite frontend builds directly to `frontend/dist` using `npm --prefix frontend run build`.
-- Set `VITE_API_BASE_URL` in **Vercel Project Settings > Environment Variables** to your permanent HTTPS backend API URL.
-- Pre-compiled contract artifacts reside in [`contracts/managed/shadow-kyc/`](./contracts/managed/shadow-kyc/) and are statically bundled into `frontend/public/`.
+Sandbox Mode is explicitly labelled in the interface so simulated transactions are not confused with real Midnight Preprod transactions.
 
-### 2. Permanent Backend API & Proof Server (Docker)
-Deploy the permanent backend on any container platform (Railway, Render, Fly.io, DigitalOcean, or VPS):
+### Midnight Preprod Mode
 
-```bash
-# Start both the ZK Proof Server and Shadow-KYC API Gateway
-docker compose -f docker-compose.prod.yml up -d
+For real blockchain interaction and development, Shadow-KYC can be run locally against the Midnight Preprod network.
+
+```text
+┌─────────────────────── USER BROWSER ───────────────────────┐
+│                                                             │
+│                    React / Vite Frontend                    │
+│                                                             │
+│         ├──────── Lace Wallet ────────┐                     │
+│         │                             │                     │
+└─────────┼─────────────────────────────┼─────────────────────┘
+          │                             │
+          ▼                             ▼
+   Midnight.js SDK           Midnight Preprod Network
+          │                     • Node RPC
+          │                     • GraphQL Indexer
+          │                     • Contract Ledger State
+          ▼
+Local ZK Proof Server
+    Docker :6300
 ```
 
-### 3. Verify the Deployed API
-Test endpoints directly:
-```bash
-# Check server & network status:
-curl -s https://your-backend-domain/api/status
+Preprod Mode uses the actual Midnight SDK, Compact smart contract, Lace Wallet, ZK proof generation, and Midnight Preprod network.
 
-# Check on-chain ledger state:
-curl -s https://your-backend-domain/api/state
-```
+### Public Frontend
+
+The frontend is deployed on Vercel and can be accessed at:
+- [https://shadow-kyc.vercel.app/](https://shadow-kyc.vercel.app/)
+
+For reviewer demonstration, open:
+- [https://shadow-kyc.vercel.app/?sandbox=true](https://shadow-kyc.vercel.app/?sandbox=true)
+
+The Sandbox environment is designed to make the product publicly reviewable without requiring reviewers to configure a Midnight wallet or maintain a local proof server.
+
+### Local Preprod Development
+
+To interact with the real Midnight Preprod network:
+1. Configure Lace Wallet for Midnight Preprod.
+2. Configure the project environment variables for preprod.
+3. Start the local Midnight ZK Proof Server.
+4. Compile the Compact smart contract.
+5. Start the local backend/API services when required.
+6. Start the frontend.
+7. Connect Lace and interact with the deployed Preprod contract.
+
+The local development instructions below provide the required commands.
+
+> [!IMPORTANT]
+> **Sandbox Mode is a demonstration environment.** It does not represent simulated transactions as confirmed blockchain transactions. Real on-chain interactions are performed only when using Midnight Preprod Mode.
 
 ---
 
