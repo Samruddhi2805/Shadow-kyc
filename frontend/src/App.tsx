@@ -24,6 +24,14 @@ import type {
   TxModalProgressState,
   TxResponse,
 } from './types'
+import { ShadowKycLogo } from './ShadowKycLogo'
+import {
+  ShieldCheckIcon,
+  BadgeCheckIcon,
+  ScaleIcon,
+  LockKeyholeIcon,
+  CopyIcon,
+} from './components/Icons'
 import './App.css'
 
 // ─── Small helpers ─────────────────────────────────────────────────────────────
@@ -149,6 +157,19 @@ async function validateConnectedAPI(api: ConnectedAPI): Promise<boolean> {
   }
 }
 
+/**
+ * Developer helper to request 20 tNIGHT from a local devnet faucet server.
+ * Retained for development / testing utility.
+ */
+export async function requestDevnetFaucet(address: string): Promise<{ txId?: string; error?: string }> {
+  const response = await fetch('/api/faucet', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ address }),
+  });
+  return response.json();
+}
+
 // ─── Main Component ────────────────────────────────────────────────────────────
 
 function App() {
@@ -189,7 +210,7 @@ function App() {
   const [connectedWallet, setConnectedWallet] = useState<ConnectedWalletInfo | null>(null)
   const [showWalletModal, setShowWalletModal] = useState(false)
   const [showWalletSuccessPop, setShowWalletSuccessPop] = useState<ConnectedWalletInfo | null>(null)
-  const [availableWallets, setAvailableWallets] = useState<Array<{ id: string; name: string }>>([])
+  const [availableWallets, setAvailableWallets] = useState<Array<{ id: string; name: string; icon?: string; rdns?: string; apiVersion?: string }>>([])
   const [isConnectingWallet, setIsConnectingWallet] = useState(false)
   const [txProgress, setTxProgress] = useState<TxModalProgressState | null>(null)
   const [deployedContract, setDeployedContract] = useState<FoundContract<ShadowKycContract<ShadowKycPrivateState>> | null>(null)
@@ -204,24 +225,53 @@ function App() {
     window.setTimeout(() => setToast(null), 5000)
   }, [])
 
-  const scanWallets = useCallback(() => {
+  const getMidnightWallets = useCallback(() => {
     if (typeof window === 'undefined' || !window.midnight) {
-      setAvailableWallets([])
-      return
+      return [];
     }
-    const keys = Object.keys(window.midnight)
-    
-    // Only update availableWallets if the list of keys actually changed
-    setAvailableWallets((prev) => {
-      const prevKeys = prev.map(w => w.id);
-      const hasChanged = keys.length !== prevKeys.length || keys.some(k => !prevKeys.includes(k));
-      if (!hasChanged) return prev;
-      return keys.map((id) => ({
-        id,
-        name: window.midnight![id]?.name || id,
-      }));
-    });
-  }, [])
+
+    try {
+      const entries = Object.entries(window.midnight);
+      const wallets = entries
+        .filter(([_id, wallet]) => {
+          if (!wallet || typeof wallet !== 'object') return false;
+          const api = wallet as any;
+          return (
+            typeof api.connect === 'function' ||
+            typeof api.enable === 'function' ||
+            Boolean(api.name || api.rdns || api.apiVersion)
+          );
+        })
+        .map(([id, wallet]) => {
+          const api = wallet as any;
+          return {
+            id,
+            name: api.name || (id.toLowerCase().includes('1am') ? '1AM' : id.toLowerCase().includes('lace') ? 'Lace' : id),
+            icon: api.icon,
+            rdns: api.rdns,
+            apiVersion: api.apiVersion,
+          };
+        });
+
+      wallets.sort((a, b) => {
+        const aIsLace = a.id.toLowerCase().includes('lace') || a.name.toLowerCase().includes('lace');
+        const bIsLace = b.id.toLowerCase().includes('lace') || b.name.toLowerCase().includes('lace');
+        if (aIsLace && !bIsLace) return -1;
+        if (!aIsLace && bIsLace) return 1;
+        return a.name.localeCompare(b.name);
+      });
+
+      return wallets;
+    } catch (err) {
+      console.warn('[scanWallets] Error scanning window.midnight:', err);
+      return [];
+    }
+  }, []);
+
+  const scanWallets = useCallback(() => {
+    const wallets = getMidnightWallets();
+    setAvailableWallets(wallets);
+  }, [getMidnightWallets]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -237,8 +287,8 @@ function App() {
             apiVersion: apiObj?.apiVersion,
             rdns: apiObj?.rdns,
             iconExists: !!apiObj?.icon,
-            properties: Object.keys(apiObj || {}),
-            isLace: key.toLowerCase().includes('lace') || apiObj?.name?.toLowerCase().includes('lace')
+            hasConnect: typeof apiObj?.connect === 'function',
+            hasEnable: typeof (apiObj as any)?.enable === 'function',
           });
         });
       } else {
@@ -249,10 +299,16 @@ function App() {
   }, [])
 
   useEffect(() => {
-    scanWallets()
-    const id = window.setInterval(scanWallets, 1500)
-    return () => window.clearInterval(id)
-  }, [])
+    scanWallets();
+    const id = window.setInterval(scanWallets, 1000);
+    return () => window.clearInterval(id);
+  }, [scanWallets]);
+
+  useEffect(() => {
+    if (showWalletModal) {
+      scanWallets();
+    }
+  }, [showWalletModal, scanWallets]);
 
   const connectWallet = useCallback(async (walletId: string, isAutoConnect = false) => {
     globalContractInitFailed = false;
@@ -270,19 +326,12 @@ function App() {
       return;
     }
 
-    // Verify that the selected wallet is actually Lace (or has 'lace' in ID/name)
     const initialWalletObj = window.midnight[walletId];
-    const isLace = walletId.toLowerCase().includes('lace') || (((initialWalletObj as any)?.name || '').toLowerCase().includes('lace'));
-    if (!isLace) {
-      if (!isAutoConnect) {
-        showToast('error', 'Only Lace Wallet is supported for this application.');
-      }
-      return;
-    }
+    const walletDisplayName = (initialWalletObj as any)?.name || walletId;
 
     // For auto-connect only: if we already have an active verified connection, keep it
     if (isAutoConnect && globalConnectedAPI && globalConnectedWallet && globalConnectedWallet.id === walletId) {
-      console.log('[Lace Connect] Validating existing ConnectedAPI for auto-connect...');
+      console.log(`[${walletDisplayName} Connect] Validating existing ConnectedAPI for auto-connect...`);
       const isValid = await validateConnectedAPI(globalConnectedAPI);
       if (isValid) {
         setConnectedWallet(globalConnectedWallet);
@@ -292,7 +341,7 @@ function App() {
         setShowWalletModal(false);
         return;
       } else {
-        console.warn('[Lace Connect] Cached ConnectedAPI failed validation. Purging stale session...');
+        console.warn(`[${walletDisplayName} Connect] Cached ConnectedAPI failed validation. Purging stale session...`);
         resetGlobalWalletState();
         connectedApiRef.current = null;
         setConnectedWallet(null);
@@ -311,7 +360,7 @@ function App() {
     connectingRef.current = true;
     setIsConnectingWallet(true);
     if (!isAutoConnect) {
-      showToast('info', `Connecting to ${(initialWalletObj as any)?.name || 'Lace'}... Please check your wallet extension popup.`);
+      showToast('info', `Connecting to ${walletDisplayName}... Please check your wallet extension popup.`);
     }
 
     try {
@@ -326,47 +375,50 @@ function App() {
         connect?: (networkId?: string) => Promise<ConnectedAPI>;
         enable?: () => Promise<ConnectedAPI>;
         name?: string;
+        icon?: string;
+        rdns?: string;
+        apiVersion?: string;
       };
 
       if (!freshWalletObj) {
-        throw new Error(`Lace extension (${walletId}) is not available in window.midnight. Please ensure the extension is installed and enabled.`);
+        throw new Error(`${walletDisplayName} extension (${walletId}) is not available in window.midnight. Please ensure the extension is installed and enabled.`);
       }
 
       // Step 1: Try connecting with targetNetwork parameter (e.g. 'preprod')
       if (typeof freshWalletObj.connect === 'function') {
         try {
-          console.log(`[Lace Connect] Requesting fresh connect('${targetNetwork}')...`);
+          console.log(`[${walletDisplayName} Connect] Requesting fresh connect('${targetNetwork}')...`);
           walletApi = await freshWalletObj.connect(targetNetwork);
         } catch (e: any) {
           lastErr = e;
-          console.warn(`[Lace Connect] connect('${targetNetwork}') failed, trying parameter-less connect():`, e);
+          console.warn(`[${walletDisplayName} Connect] connect('${targetNetwork}') failed, trying parameter-less connect():`, e);
         }
       }
 
       // Step 2: Try parameter-less connect() if first attempt failed
       if (!walletApi && typeof freshWalletObj.connect === 'function') {
         try {
-          console.log('[Lace Connect] Requesting fresh parameter-less connect()...');
+          console.log(`[${walletDisplayName} Connect] Requesting fresh parameter-less connect()...`);
           walletApi = await freshWalletObj.connect();
         } catch (e: any) {
           lastErr = e;
-          console.warn('[Lace Connect] Parameter-less connect failed:', e);
+          console.warn(`[${walletDisplayName} Connect] Parameter-less connect failed:`, e);
         }
       }
 
       // Step 3: Fallback to legacy enable() if available
       if (!walletApi && typeof freshWalletObj.enable === 'function') {
         try {
-          console.log('[Lace Connect] Requesting fresh legacy enable()...');
+          console.log(`[${walletDisplayName} Connect] Requesting fresh legacy enable()...`);
           walletApi = await freshWalletObj.enable();
         } catch (e: any) {
           lastErr = e;
-          console.warn('[Lace Connect] enable() failed:', e);
+          console.warn(`[${walletDisplayName} Connect] enable() failed:`, e);
         }
       }
 
       if (!walletApi) {
-        throw lastErr || new Error(`Unable to connect to ${freshWalletObj.name || walletId}. Please check the Lace extension popup and permissions.`);
+        throw lastErr || new Error(`Unable to connect to ${freshWalletObj.name || walletDisplayName}. Please check the ${walletDisplayName} extension popup and permissions.`);
       }
 
       console.log(`[Wallet Connection] Connected API successfully established:`, walletApi);
@@ -406,7 +458,7 @@ function App() {
 
       const connectedWalletObj: ConnectedWalletInfo = {
         id: walletId,
-        name: freshWalletObj.name || 'Lace',
+        name: freshWalletObj.name || walletDisplayName,
         address: finalAddress,
         tNight: rawBalance,
         dust: '0',
@@ -441,7 +493,7 @@ function App() {
       setShowWalletModal(false);
       setShowWalletSuccessPop(connectedWalletObj);
       if (!isAutoConnect) {
-        showToast('success', `Successfully connected to ${freshWalletObj.name || 'Lace'}!`);
+        showToast('success', `Successfully connected to ${freshWalletObj.name || walletDisplayName}!`);
       }
     } catch (err: any) {
       console.error('[Wallet Connection Error]', err);
@@ -455,21 +507,22 @@ function App() {
       const errMsg = details.toLowerCase();
       let displayMsg = details;
 
+      const walletName = walletDisplayName || 'Wallet';
       if (
         errMsg.includes('midnight-authenticator') ||
         errMsg.includes('midnight-connector') ||
         errMsg.includes('shutdown') ||
         errMsg.includes('no longer be used')
       ) {
-        displayMsg = 'Lace session channel was reset. Please ensure Lace is unlocked, then click Connect Wallet again.';
+        displayMsg = `${walletName} session channel was reset. Please ensure ${walletName} is unlocked, then click Connect Wallet again.`;
         localStorage.removeItem('connectedWalletId');
       } else if (errMsg.includes('wallet is locked') || (errMsg.includes('locked') && !errMsg.includes('unlocked') && !errMsg.includes('block'))) {
-        displayMsg = 'Please unlock Lace, then click Connect Wallet.';
+        displayMsg = `Please unlock ${walletName}, then click Connect Wallet.`;
         localStorage.removeItem('connectedWalletId');
       } else if (err?.code === 'Rejected' || errMsg.includes('reject') || err?.code === 'PermissionRejected') {
-        displayMsg = 'Wallet connection rejected in Lace.';
+        displayMsg = `Wallet connection rejected in ${walletName}.`;
       } else if (errMsg.includes('network')) {
-        displayMsg = 'Please switch Lace to Midnight Preprod.';
+        displayMsg = `Please switch ${walletName} to Midnight Preprod.`;
       }
 
       if (!isAutoConnect) {
@@ -487,49 +540,21 @@ function App() {
   const autoConnectedRef = useRef(false);
 
   useEffect(() => {
-    const laceWallet = availableWallets.find(w => w.id.toLowerCase().includes('lace') || w.name.toLowerCase().includes('lace'));
-    if (laceWallet && !connectedWallet && !autoConnectedRef.current) {
+    if (!connectedWallet && !autoConnectedRef.current && availableWallets.length > 0) {
       const savedId = localStorage.getItem('connectedWalletId');
-      if (savedId && (savedId.toLowerCase().includes('lace') || savedId === laceWallet.id)) {
-        autoConnectedRef.current = true;
-        void connectWallet(laceWallet.id, true);
+      if (savedId) {
+        const matchingWallet = availableWallets.find(
+          w => w.id === savedId ||
+               (savedId.toLowerCase().includes('lace') && w.name.toLowerCase().includes('lace')) ||
+               ((savedId.toLowerCase().includes('1am') || savedId.toLowerCase().includes('oneam')) && (w.name.toLowerCase().includes('1am') || w.name.toLowerCase().includes('oneam')))
+        );
+        if (matchingWallet) {
+          autoConnectedRef.current = true;
+          void connectWallet(matchingWallet.id, true);
+        }
       }
     }
   }, [availableWallets, connectedWallet, connectWallet]);
-
-
-  const [isRequestingFaucet, setIsRequestingFaucet] = useState(false);
-
-  const handleFaucetRequest = useCallback(async () => {
-    if (!connectedWallet) return;
-    setIsRequestingFaucet(true);
-    showToast('info', 'Requesting 20 tNIGHT from local backend faucet...');
-    try {
-      const response = await fetch('/api/faucet', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ address: connectedWallet.address }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Faucet request failed');
-      }
-      showToast('success', `Faucet transfer successful! Tx ID: ${data.txId?.slice(0, 10)}... Please wait 5-10 seconds for block inclusion.`);
-      
-      // Wait 8 seconds for block inclusion and refresh balance
-      await new Promise(r => setTimeout(r, 8000));
-      if (connectedApiRef.current) {
-        const balances = await connectedApiRef.current.getUnshieldedBalances();
-        const rawBalance = (balances['00'] ?? Object.values(balances)[0] ?? 0n).toString();
-        setConnectedWallet(prev => prev ? { ...prev, tNight: rawBalance } : null);
-        console.log('[Faucet Request] Updated Lace wallet balance:', rawBalance);
-      }
-    } catch (err: any) {
-      showToast('error', err.message || String(err));
-    } finally {
-      setIsRequestingFaucet(false);
-    }
-  }, [connectedWallet, showToast]);
 
   const disconnectWallet = useCallback(() => {
     resetGlobalWalletState();
@@ -644,7 +669,12 @@ function App() {
               }
             : null
         )
-        showToast('success', `${tx.message} (tx ${shortHex(tx.txId, 8, 6)})`)
+        showToast(
+          'success',
+          isSandbox
+            ? 'Sandbox transaction simulated successfully — no transaction was submitted to Midnight Preprod.'
+            : `${tx.message}${tx.txId && tx.txId !== 'Simulated' ? ` (tx ${shortHex(tx.txId, 8, 6)})` : ''}`
+        )
         await refresh()
       } catch (err: any) {
         console.error('[TX ERROR DETAILED]', err);
@@ -707,14 +737,15 @@ function App() {
           /submitting scoped transaction/i.test(errMsg) ||
           /submitTransaction/i.test(errMsg);
 
+        const walletLabel = connectedWallet?.name || 'Wallet';
         if (isDustError) {
-          errorCategory = 'Lace DUST Balance Required';
-          errMsg = "Insufficient DUST in Lace Wallet. Midnight transactions require DUST to cover zero-knowledge circuit verification fees.";
-          recoveryTip = "Open Lace Wallet, go to the Midnight tab, click 'Generate DUST' (or register your NIGHT tokens), and wait 1-2 blocks.";
+          errorCategory = `${walletLabel} DUST Balance Required`;
+          errMsg = `Insufficient DUST in ${walletLabel}. Midnight transactions require DUST to cover zero-knowledge circuit verification fees.`;
+          recoveryTip = `Open ${walletLabel}, ensure you have registered DUST (or generated DUST from NIGHT tokens), and wait 1-2 blocks.`;
         } else if (isSubmissionError) {
-          errorCategory = 'Lace / Midnight Submission Error';
-          errMsg = "Lace Wallet was unable to submit the signed transaction to the Midnight node.";
-          recoveryTip = "Ensure you have generated DUST in Lace Wallet (click the purple Midnight icon in Lace, then 'Generate DUST' / 'Register NIGHT'). If you already registered DUST, wait 1-2 blocks for the DUST UTXO to confirm, disconnect & reconnect Lace, and try again.";
+          errorCategory = `${walletLabel} / Midnight Submission Error`;
+          errMsg = `${walletLabel} was unable to submit the signed transaction to the Midnight node.`;
+          recoveryTip = `Ensure you have generated DUST in ${walletLabel}. If you already registered DUST, wait 1-2 blocks for the DUST UTXO to confirm, disconnect & reconnect ${walletLabel}, and try again.`;
         } else if (isProverError) {
           errorCategory = 'ZK Proof Server Unreachable';
           errMsg = "The transaction could not connect to the Midnight ZK Proof Server (:6300).";
@@ -726,14 +757,14 @@ function App() {
         } else if (isCancelled) {
           errorCategory = 'Transaction Cancelled';
           errMsg = "The transaction signing request was declined or cancelled in your wallet.";
-          recoveryTip = "Re-try the transaction and approve the signature prompt in Lace Wallet.";
+          recoveryTip = `Re-try the transaction and approve the signature prompt in ${walletLabel}.`;
         } else if (isTimeout) {
           errorCategory = 'Transaction Timeout';
           errMsg = "The ZK transaction took longer than expected.";
           recoveryTip = "Zero-knowledge proofs can take 30-60s on complex circuits. Please check your network and try again.";
         } else if (/Insufficient tNIGHT/i.test(errMsg)) {
           errorCategory = 'Insufficient tNIGHT';
-          recoveryTip = "Request 20 tNIGHT using the faucet button in the header or visit the Midnight Preprod testnet faucet.";
+          recoveryTip = "Request tNIGHT using the official Midnight Preprod testnet faucet.";
         }
 
         // Contract assertion errors (409) are warnings, not fatal crashes
@@ -772,30 +803,29 @@ function App() {
   const handleIssue = useCallback(async () => {
     if (isSandbox) {
       const customC = userCommitment || 'e5d4c3b2a19087e6d5c4b3a291807f6e5d4c3b2a19087e6d5c4b3a291807f6e5';
-      void runTxWithModal('issueCredential', 'Request KYC Credential (Sandbox ZK)', customC, async () => {
+      void runTxWithModal('issueCredential', 'Request KYC Credential (Sandbox Simulation)', customC, async () => {
         await new Promise(r => setTimeout(r, 600));
         setSandboxState(prev => ({
           ...prev,
           pendingCredentials: [customC, ...prev.pendingCredentials.filter(c => c !== customC)]
         }));
-        const mockTx = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(32))).map(b => b.toString(16).padStart(2, '0')).join('');
         setHistory(prev => [
           {
             id: Date.now().toString(),
             action: 'issueCredential',
-            txId: mockTx,
-            blockHeight: 2126835,
+            txId: 'Simulated',
+            blockHeight: 0,
             commitment: customC,
-            message: 'ZK Credential request submitted to pending registry (Sandbox).',
+            message: 'Sandbox transaction simulated successfully — no transaction was submitted to Midnight Preprod.',
             timestamp: new Date().toISOString(),
           },
           ...prev
         ]);
         return {
-          txId: mockTx,
-          blockHeight: 2126835,
+          txId: 'Simulated',
+          blockHeight: 0,
           commitment: customC,
-          message: 'ZK Credential request submitted to pending registry (Sandbox).',
+          message: 'Sandbox transaction simulated successfully — no transaction was submitted to Midnight Preprod.',
         };
       });
       return;
@@ -805,12 +835,13 @@ function App() {
       const secret = await getDeterministicSecret(connectedWallet.address);
       const realCommitment = await computeRealCommitment(secret);
       
-      void runTxWithModal('issueCredential', 'Request KYC Credential (Lace Wallet ZK)', realCommitment, async () => {
+      const walletLabel = connectedWallet.name || 'Midnight';
+      void runTxWithModal('issueCredential', `Request KYC Credential (${walletLabel} Wallet ZK)`, realCommitment, async () => {
         console.log('[TX] issueCredential started');
-        console.log('[Lace ZK] Fetching real-time balance before transaction...');
+        console.log(`[${walletLabel} ZK] Fetching real-time balance before transaction...`);
         if (!connectedApiRef.current) {
           throw new Error(
-            'Lace wallet is not connected. Please reconnect Lace and try again.'
+            `${walletLabel} wallet is not connected. Please reconnect ${walletLabel} and try again.`
           );
         }
 
@@ -823,7 +854,7 @@ function App() {
             balances['00'] ?? Object.values(balances)[0] ?? 0n;
 
           console.log(
-            '[Lace ZK] Real-time balance (micro-tNIGHT):',
+            `[${walletLabel} ZK] Real-time balance (micro-tNIGHT):`,
             currentBalance.toString()
           );
 
@@ -834,12 +865,12 @@ function App() {
           );
         } catch (err) {
           console.error(
-            '[Lace ZK] Wallet API balance lookup failed:',
+            `[${walletLabel} ZK] Wallet API balance lookup failed:`,
             err
           );
 
           throw new Error(
-            'Lace wallet connection expired. Please disconnect and reconnect Lace, then try again.',
+            `${walletLabel} wallet connection expired. Please disconnect and reconnect ${walletLabel}, then try again.`,
             { cause: err }
           );
         }
@@ -860,7 +891,7 @@ function App() {
         console.log('[TX] transaction object created');
         console.log('[TX] submitTransaction completed');
 
-        setTxProgress((prev: any) => prev ? { ...prev, step: 'signing', message: 'Submitting transaction via Lace Wallet...', txId: tx.public.txId, blockHeight: tx.public.blockHeight } : null);
+        setTxProgress((prev: any) => prev ? { ...prev, step: 'signing', message: `Submitting transaction via ${walletLabel} Wallet...`, txId: tx.public.txId, blockHeight: tx.public.blockHeight } : null);
         
         // Log transaction to backend audit server
         await api.recordAudit({
@@ -868,14 +899,14 @@ function App() {
           txId: tx.public.txId,
           blockHeight: tx.public.blockHeight,
           commitment: realCommitment,
-          message: 'Credential request submitted client-side via Lace Wallet. ZK proof generated locally.',
+          message: `Credential request submitted client-side via ${walletLabel} Wallet. ZK proof generated locally.`,
         }).catch(console.warn);
 
         return {
           txId: tx.public.txId,
           blockHeight: tx.public.blockHeight,
           commitment: realCommitment,
-          message: 'Credential request submitted client-side via Lace Wallet. ZK proof generated locally.',
+          message: `Credential request submitted client-side via ${walletLabel} Wallet. ZK proof generated locally.`,
         };
       });
     } else {
@@ -892,31 +923,30 @@ function App() {
   const handleApprove = useCallback(
     (commitment: string) => {
       if (isSandbox) {
-        void runTxWithModal('approveCredential', 'Authority Approve Credential (Sandbox)', commitment, async () => {
+        void runTxWithModal('approveCredential', 'Authority Approve Credential (Sandbox Simulation)', commitment, async () => {
           await new Promise((r) => setTimeout(r, 600))
           setSandboxState((prev) => ({
             ...prev,
             pendingCredentials: prev.pendingCredentials.filter((c) => c !== commitment),
             credentials: [commitment, ...prev.credentials.filter((c) => c !== commitment)],
           }))
-          const mockTx = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(32))).map((b) => b.toString(16).padStart(2, '0')).join('')
           setHistory((prev) => [
             {
               id: Date.now().toString(),
               action: 'approveCredential',
-              txId: mockTx,
-              blockHeight: 2126836,
+              txId: 'Simulated',
+              blockHeight: 0,
               commitment,
-              message: 'Compliance authority approved KYC credential commitment (Sandbox).',
+              message: 'Sandbox transaction simulated successfully — no transaction was submitted to Midnight Preprod.',
               timestamp: new Date().toISOString(),
             },
             ...prev,
           ])
           return {
-            txId: mockTx,
-            blockHeight: 2126836,
+            txId: 'Simulated',
+            blockHeight: 0,
             commitment,
-            message: 'Compliance authority approved KYC credential commitment (Sandbox).',
+            message: 'Sandbox transaction simulated successfully — no transaction was submitted to Midnight Preprod.',
           }
         })
         return
@@ -932,42 +962,42 @@ function App() {
   const handleProve = useCallback(
     (commitment: string) => {
       if (isSandbox) {
-        void runTxWithModal('proveEligibility', 'Zero-Knowledge Prove Eligibility (Sandbox)', commitment, async () => {
+        void runTxWithModal('proveEligibility', 'Zero-Knowledge Prove Eligibility (Sandbox Simulation)', commitment, async () => {
           await new Promise((r) => setTimeout(r, 600))
           setSandboxState((prev) => ({
             ...prev,
             eligibilityCount: (Number(prev.eligibilityCount) + 1).toString(),
           }))
-          const mockTx = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(32))).map((b) => b.toString(16).padStart(2, '0')).join('')
           setHistory((prev) => [
             {
               id: Date.now().toString(),
               action: 'proveEligibility',
-              txId: mockTx,
-              blockHeight: 2126837,
+              txId: 'Simulated',
+              blockHeight: 0,
               commitment,
-              message: 'Zero-Knowledge eligibility proved! Secret never disclosed (Sandbox).',
+              message: 'Sandbox transaction simulated successfully — no transaction was submitted to Midnight Preprod.',
               timestamp: new Date().toISOString(),
             },
             ...prev,
           ])
           return {
-            txId: mockTx,
-            blockHeight: 2126837,
+            txId: 'Simulated',
+            blockHeight: 0,
             commitment,
-            message: 'Zero-Knowledge eligibility proved! Secret never disclosed (Sandbox).',
+            message: 'Sandbox transaction simulated successfully — no transaction was submitted to Midnight Preprod.',
           }
         })
         return
       }
 
       if (deployedContract && connectedWallet && !connectedWallet.isWebWallet) {
-        void runTxWithModal('proveEligibility', 'ZK Prove Eligibility (Lace Wallet ZK)', commitment, async () => {
+        const walletLabel = connectedWallet.name || 'Midnight';
+        void runTxWithModal('proveEligibility', `ZK Prove Eligibility (${walletLabel} Wallet ZK)`, commitment, async () => {
           console.log('[TX] proveEligibility started');
-          console.log('[Lace ZK] Fetching real-time balance before transaction...');
+          console.log(`[${walletLabel} ZK] Fetching real-time balance before transaction...`);
           if (!connectedApiRef.current) {
             throw new Error(
-              'Lace wallet is not connected. Please reconnect Lace and try again.'
+              `${walletLabel} wallet is not connected. Please reconnect ${walletLabel} and try again.`
             );
           }
 
@@ -980,7 +1010,7 @@ function App() {
               balances['00'] ?? Object.values(balances)[0] ?? 0n;
 
             console.log(
-              '[Lace ZK] Real-time balance (micro-tNIGHT):',
+              `[${walletLabel} ZK] Real-time balance (micro-tNIGHT):`,
               currentBalance.toString()
             );
 
@@ -991,12 +1021,12 @@ function App() {
             );
           } catch (err) {
             console.error(
-              '[Lace ZK] Wallet API balance lookup failed:',
+              `[${walletLabel} ZK] Wallet API balance lookup failed:`,
               err
             );
 
             throw new Error(
-              'Lace wallet connection expired. Please disconnect and reconnect Lace, then try again.',
+              `${walletLabel} wallet connection expired. Please disconnect and reconnect ${walletLabel}, then try again.`,
               { cause: err }
             );
           }
@@ -1018,7 +1048,7 @@ function App() {
           console.log('[TX] transaction object created');
           console.log('[TX] submitTransaction completed');
 
-          setTxProgress((prev: any) => prev ? { ...prev, step: 'signing', message: 'Submitting transaction via Lace Wallet...', txId: tx.public.txId, blockHeight: tx.public.blockHeight } : null);
+          setTxProgress((prev: any) => prev ? { ...prev, step: 'signing', message: `Submitting transaction via ${walletLabel} Wallet...`, txId: tx.public.txId, blockHeight: tx.public.blockHeight } : null);
 
           // Log transaction to backend audit server
           await api.recordAudit({
@@ -1048,31 +1078,30 @@ function App() {
   const handleRevoke = useCallback(
     (commitment: string) => {
       if (isSandbox) {
-        void runTxWithModal('revokeCredential', 'Revoke Credential Authorization (Sandbox)', commitment, async () => {
+        void runTxWithModal('revokeCredential', 'Revoke Credential Authorization (Sandbox Simulation)', commitment, async () => {
           await new Promise((r) => setTimeout(r, 600))
           setSandboxState((prev) => ({
             ...prev,
             credentials: prev.credentials.filter((c) => c !== commitment),
             revokedCredentials: [commitment, ...prev.revokedCredentials.filter((c) => c !== commitment)],
           }))
-          const mockTx = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(32))).map((b) => b.toString(16).padStart(2, '0')).join('')
           setHistory((prev) => [
             {
               id: Date.now().toString(),
               action: 'revokeCredential',
-              txId: mockTx,
-              blockHeight: 2126838,
+              txId: 'Simulated',
+              blockHeight: 0,
               commitment,
-              message: 'Credential commitment revoked from compliant set (Sandbox).',
+              message: 'Sandbox transaction simulated successfully — no transaction was submitted to Midnight Preprod.',
               timestamp: new Date().toISOString(),
             },
             ...prev,
           ])
           return {
-            txId: mockTx,
-            blockHeight: 2126838,
+            txId: 'Simulated',
+            blockHeight: 0,
             commitment,
-            message: 'Credential commitment revoked from compliant set (Sandbox).',
+            message: 'Sandbox transaction simulated successfully — no transaction was submitted to Midnight Preprod.',
           }
         })
         return
@@ -1094,58 +1123,58 @@ function App() {
     }
 
     if (isSandbox) {
-      void runTxWithModal('proveEligibility', 'Zero-Knowledge Prove Custom Commitment (Sandbox)', c, async () => {
+      void runTxWithModal('proveEligibility', 'Zero-Knowledge Prove Custom Commitment (Sandbox Simulation)', c, async () => {
         await new Promise((r) => setTimeout(r, 600))
         setSandboxState((prev) => ({
           ...prev,
           eligibilityCount: (Number(prev.eligibilityCount) + 1).toString(),
         }))
-        const mockTx = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(32))).map((b) => b.toString(16).padStart(2, '0')).join('')
         setHistory((prev) => [
           {
             id: Date.now().toString(),
             action: 'proveEligibility',
-            txId: mockTx,
-            blockHeight: 2126839,
+            txId: 'Simulated',
+            blockHeight: 0,
             commitment: c,
-            message: 'Zero-Knowledge eligibility proved! Secret never disclosed (Sandbox).',
+            message: 'Sandbox transaction simulated successfully — no transaction was submitted to Midnight Preprod.',
             timestamp: new Date().toISOString(),
           },
           ...prev,
         ])
         return {
-          txId: mockTx,
-          blockHeight: 2126839,
+          txId: 'Simulated',
+          blockHeight: 0,
           commitment: c,
-          message: 'Zero-Knowledge eligibility proved! Secret never disclosed (Sandbox).',
+          message: 'Sandbox transaction simulated successfully — no transaction was submitted to Midnight Preprod.',
         }
       })
       return
     }
 
     if (deployedContract && connectedWallet && !connectedWallet.isWebWallet) {
-      void runTxWithModal('proveEligibility', 'ZK Prove Custom Commitment (Lace Wallet ZK)', c, async () => {
-        console.log('[Lace ZK] Calling proveEligibility circuit for custom commitment:', c);
+      const walletLabel = connectedWallet.name || 'Midnight';
+      void runTxWithModal('proveEligibility', `ZK Prove Custom Commitment (${walletLabel} Wallet ZK)`, c, async () => {
+        console.log(`[${walletLabel} ZK] Calling proveEligibility circuit for custom commitment:`, c);
         setTxProgress((prev: any) => prev ? { ...prev, step: 'proving', message: 'Generating local ZK proof...' } : null);
 
         const commitmentBytes = new Uint8Array(Buffer.from(c, 'hex'));
         const tx = await deployedContract.callTx.proveEligibility(commitmentBytes);
 
-        setTxProgress((prev: any) => prev ? { ...prev, step: 'signing', message: 'Submitting transaction via Lace Wallet...', txId: tx.public.txId, blockHeight: tx.public.blockHeight } : null);
+        setTxProgress((prev: any) => prev ? { ...prev, step: 'signing', message: `Submitting transaction via ${walletLabel} Wallet...`, txId: tx.public.txId, blockHeight: tx.public.blockHeight } : null);
 
         await api.recordAudit({
           action: 'proveEligibility',
           txId: tx.public.txId,
           blockHeight: tx.public.blockHeight,
           commitment: c,
-          message: 'Custom eligibility proven client-side with a local ZK proof.',
+          message: `Custom eligibility proven client-side with a local ZK proof via ${walletLabel} Wallet.`,
         }).catch(console.warn);
 
         return {
           txId: tx.public.txId,
           blockHeight: tx.public.blockHeight,
           commitment: c,
-          message: 'Custom eligibility proven client-side with a local ZK proof.',
+          message: `Custom eligibility proven client-side with a local ZK proof via ${walletLabel} Wallet.`,
         };
       });
     } else {
@@ -1158,6 +1187,9 @@ function App() {
   if (loading) {
     return (
       <div className="app-loading">
+        <div className="brand-mark" style={{ width: 56, height: 56, borderRadius: 16 }}>
+          <ShadowKycLogo width={38} height={38} />
+        </div>
         <div className="spinner" />
         <p>Connecting to Shadow-KYC Smart Contract on Midnight Network…</p>
       </div>
@@ -1166,41 +1198,94 @@ function App() {
 
   return (
     <div className="app">
-      <div className="sandbox-banner">
+      <div className={`sandbox-banner ${isSandbox ? 'sandbox-active' : 'live-active'}`}>
         <div className="sandbox-banner-left">
-          <span className="sandbox-tag">{isSandbox ? '🧪 Reviewer Sandbox' : '🌐 Midnight Preprod'}</span>
-          <span>
-            {isSandbox
-              ? 'Interactive Reviewer Sandbox Active · Test all 4 ZK circuits instantly with simulated zero-knowledge state'
-              : 'Connected to Midnight Preprod Testnet · Contract 1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0'}
-          </span>
+          {/* Professional Mode Selector: LIVE PREPROD | SANDBOX */}
+          <div className="mode-selector-pill" role="radiogroup" aria-label="Environment Mode">
+            <button
+              type="button"
+              className={`mode-btn ${!isSandbox ? 'active live' : ''}`}
+              onClick={() => {
+                if (isSandbox) {
+                  setIsSandbox(false);
+                  showToast('info', 'Switched to Live Midnight Preprod Mode');
+                }
+              }}
+            >
+              LIVE PREPROD
+            </button>
+            <span className="mode-divider">|</span>
+            <button
+              type="button"
+              className={`mode-btn ${isSandbox ? 'active sandbox' : ''}`}
+              onClick={() => {
+                if (!isSandbox) {
+                  setIsSandbox(true);
+                  showToast('info', 'Switched to Sandbox Mode (Simulation)');
+                }
+              }}
+            >
+              SANDBOX
+            </button>
+          </div>
+
+          {/* Visual Indicator of Environment Characteristics */}
+          <div className="mode-status-text">
+            {!isSandbox ? (
+              <span>
+                <strong style={{ color: 'var(--emerald)' }}>🟢 Live Preprod</strong>
+                <span className="mode-meta-dot">•</span>
+                <span>Real wallet</span>
+                <span className="mode-meta-dot">•</span>
+                <span>Real tDUST</span>
+                <span className="mode-meta-dot">•</span>
+                <span>Real blockchain transaction</span>
+              </span>
+            ) : (
+              <span>
+                <strong style={{ color: '#f59e0b' }}>🟡 Sandbox</strong>
+                <span className="mode-meta-dot">•</span>
+                <span>No wallet required</span>
+                <span className="mode-meta-dot">•</span>
+                <span>No tDUST required</span>
+                <span className="mode-meta-dot">•</span>
+                <span>Simulation only</span>
+              </span>
+            )}
+          </div>
         </div>
+
         <div className="sandbox-controls">
-          <button
-            className={`btn-sandbox ${isSandbox ? 'active' : ''}`}
-            onClick={() => {
-              const next = !isSandbox;
-              setIsSandbox(next);
-              showToast('info', next ? 'Switched to Interactive Reviewer Sandbox Mode' : 'Switched to Live Midnight Preprod');
-            }}
-          >
-            {isSandbox ? '🟢 Sandbox Mode Active (Click for Preprod)' : '⚡ Switch to Reviewer Sandbox Mode'}
-          </button>
+          <span className="mode-badge-note">
+            {isSandbox
+              ? '🧪 Simulated Zero-Knowledge State'
+              : '⛓️ Preprod Contract: 1387bebdf0...'}
+          </span>
         </div>
       </div>
 
       <header className="app-header">
         <div className="brand">
-          <div className="brand-mark">🛡️</div>
+          <div className="brand-mark">
+            <ShadowKycLogo width={32} height={32} />
+          </div>
           <div>
             <h1>Shadow-KYC</h1>
-            <p className="tagline">Zero-Knowledge Compliance on Midnight Network</p>
+            <p className="tagline">Privacy-Preserving KYC &amp; AML</p>
+            <p className="tagline-sub">Powered by Midnight Network</p>
           </div>
         </div>
         <div className="header-meta">
-          <span className={`pill ${status ? 'pill-ok' : 'pill-err'}`}>
-            {status ? `● ${formatNetworkName(status.network)}` : '● offline'}
+          {/* Network status */}
+          <span
+            className={`pill ${isSandbox ? 'pill-warn' : 'pill-ok'}`}
+            style={isSandbox ? { background: 'rgba(245, 158, 11, 0.15)', color: '#fcd34d', borderColor: 'rgba(245, 158, 11, 0.3)' } : undefined}
+            title={isSandbox ? "Sandbox Mode: No wallet or tDUST required • Local simulation" : (status?.network ? `Connected to Midnight ${formatNetworkName(status.network)}` : "Midnight Preprod Testnet connected")}
+          >
+            {isSandbox ? '🟡 Sandbox Mode (Simulated)' : (status?.network ? `🟢 ${formatNetworkName(status.network)} — Connected` : '🟢 Midnight Preprod — Connected')}
           </span>
+
+          {/* Wallet status & controls */}
           {connectedWallet ? (
             <>
               {contractInitFailed && (
@@ -1209,35 +1294,31 @@ function App() {
                 </span>
               )}
               <span
-                className="pill pill-neutral"
+                className="pill pill-ok"
                 style={{ cursor: 'pointer', borderColor: 'var(--emerald-border)' }}
                 onClick={() => setShowWalletSuccessPop(connectedWallet)}
                 title="Click to view connected wallet details"
               >
-                💳 {connectedWallet.name}: {shortHex(connectedWallet.address, 6, 4)}
+                🟢 Wallet Connected ({connectedWallet.name}: {shortHex(connectedWallet.address, 6, 4)})
               </span>
               <span className="pill pill-neutral">
                 💰 {Number(connectedWallet.tNight).toLocaleString()} tNIGHT
               </span>
-              <button 
-                className="btn btn-secondary btn-small" 
-                onClick={handleFaucetRequest}
-                disabled={isRequestingFaucet}
-              >
-                {isRequestingFaucet ? 'Funding...' : 'Request 20 tNIGHT Faucet'}
-              </button>
               <button className="btn btn-secondary btn-small" onClick={disconnectWallet}>
                 Disconnect
               </button>
             </>
           ) : (
             <>
+              <span className="pill pill-err">
+                🔴 Wallet Not Connected
+              </span>
               {balance && (
                 <span className="pill pill-neutral">
                   Backend: {Number(balance.tNight).toLocaleString()} tNIGHT
                 </span>
               )}
-              <button className="btn btn-primary btn-small" onClick={() => setShowWalletModal(true)}>
+              <button className="btn btn-primary btn-small" onClick={() => { scanWallets(); setShowWalletModal(true); }}>
                 Connect Wallet
               </button>
             </>
@@ -1281,26 +1362,30 @@ function App() {
         <button
           className={activeTab === 'overview' ? 'tab active' : 'tab'}
           onClick={() => setActiveTab('overview')}
+          title="System Overview & Zero-Knowledge Architecture"
         >
-          Overview & ZK Visualizer
+          Overview
         </button>
         <button
           className={activeTab === 'user' ? 'tab active' : 'tab'}
           onClick={() => setActiveTab('user')}
+          title="User Verification (Request, Approve & Prove)"
         >
-          User Actions (Request / Prove)
+          User Verification
         </button>
         <button
           className={activeTab === 'authority' ? 'tab active' : 'tab'}
           onClick={() => setActiveTab('authority')}
+          title="Compliance Authority Management"
         >
-          Authority Actions (Approve / Revoke)
+          Authority
         </button>
         <button
           className={activeTab === 'audit' ? 'tab active' : 'tab'}
           onClick={() => setActiveTab('audit')}
+          title="Zero-Knowledge Audit History"
         >
-          Audit History ({history.length})
+          Audit Log ({history.length})
         </button>
       </nav>
 
@@ -1316,6 +1401,7 @@ function App() {
             userCredentialStatus={userCredentialStatus}
             onCopy={copyToClipboard}
             onNavigateUser={() => setActiveTab('user')}
+            onConnectWallet={() => { scanWallets(); setShowWalletModal(true); }}
             isSandbox={isSandbox}
           />
         )}
@@ -1333,6 +1419,7 @@ function App() {
             onProve={handleProve}
             onCustomProve={handleCustomProve}
             onCopy={copyToClipboard}
+            isSandbox={isSandbox}
           />
         )}
 
@@ -1359,52 +1446,73 @@ function App() {
       </footer>
 
       {/* ── Wallet Selector Modal ── */}
-      {showWalletModal && (
-        <div className="wallet-modal-overlay">
-          <div className="wallet-modal">
-            <div className="wallet-modal-header">
-              <h2>Connect Midnight Wallet</h2>
-              <button className="close-btn" onClick={() => setShowWalletModal(false)}>✕</button>
-            </div>
-            <div className="wallet-modal-body">
-              <div className="wallet-list">
-                <p className="wallet-list-sub">Select your Midnight wallet extension:</p>
-
-                {availableWallets
-                  .filter(w => w.id.toLowerCase().includes('lace') || w.name.toLowerCase().includes('lace'))
-                  .map((wallet) => (
-                    <button
-                      key={wallet.id}
-                      className="wallet-item-btn"
-                      onClick={() => void connectWallet(wallet.id)}
-                      disabled={isConnectingWallet}
-                    >
-                      <span className="wallet-icon">💳</span>
-                      <div className="wallet-info">
-                        <span className="wallet-name">{wallet.name}</span>
-                        <span className="wallet-meta">Official Midnight Extension</span>
-                      </div>
-                      <span className="wallet-arrow">➔</span>
-                    </button>
-                  ))}
+      {showWalletModal && (() => {
+        const displayedWallets = availableWallets.length > 0 ? availableWallets : getMidnightWallets();
+        return (
+          <div className="wallet-modal-overlay">
+            <div className="wallet-modal">
+              <div className="wallet-modal-header">
+                <h2>Connect Midnight Wallet</h2>
+                <button className="close-btn" onClick={() => setShowWalletModal(false)}>✕</button>
               </div>
-
-              {!availableWallets.some(w => w.id.toLowerCase().includes('lace') || w.name.toLowerCase().includes('lace')) && (
-                <div className="no-wallets-found" style={{ marginTop: '20px' }}>
-                  <p className="no-wallets-sub">
-                    Lace wallet extension not found in your browser.
-                  </p>
-                  <div className="download-links">
-                    <a href="https://lace.io" target="_blank" rel="noopener noreferrer" className="download-link">
-                      📥 Install Lace Wallet
-                    </a>
+              <div className="wallet-modal-body">
+                {displayedWallets.length > 0 ? (
+                  <div className="wallet-list">
+                    <p className="wallet-list-sub">Select your Midnight wallet extension:</p>
+                    {displayedWallets.map((wallet) => (
+                      <button
+                        key={wallet.id}
+                        className="wallet-item-btn"
+                        onClick={() => void connectWallet(wallet.id)}
+                        disabled={isConnectingWallet}
+                      >
+                        {wallet.icon ? (
+                          <img
+                            src={wallet.icon}
+                            alt={wallet.name}
+                            className="wallet-icon-img"
+                            style={{ width: 28, height: 28, borderRadius: 6, marginRight: 16, objectFit: 'contain' }}
+                            onError={(e) => {
+                              (e.target as HTMLElement).style.display = 'none';
+                            }}
+                          />
+                        ) : (
+                          <span className="wallet-icon">💳</span>
+                        )}
+                        <div className="wallet-info">
+                          <span className="wallet-name">{wallet.name}</span>
+                          <span className="wallet-meta">
+                            {wallet.name.toLowerCase().includes('lace')
+                              ? 'Official Midnight Extension'
+                              : wallet.name.toLowerCase().includes('1am')
+                              ? 'Midnight Privacy Wallet'
+                              : (wallet.rdns || 'Midnight Wallet')}
+                          </span>
+                        </div>
+                        <span className="wallet-arrow">➔</span>
+                      </button>
+                    ))}
                   </div>
-                </div>
-              )}
+                ) : (
+                  <div className="no-wallets-found" style={{ marginTop: '20px' }}>
+                    <p className="no-wallets-sub">
+                      No Midnight wallet extension found in your browser.
+                    </p>
+                    <div className="download-links">
+                      <a href="https://lace.io" target="_blank" rel="noopener noreferrer" className="download-link">
+                        📥 Install Lace Wallet
+                      </a>
+                      <a href="https://1am.xyz" target="_blank" rel="noopener noreferrer" className="download-link">
+                        📥 Install 1AM Wallet
+                      </a>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ── Wallet Connection Pop-up Message Modal ── */}
       {showWalletSuccessPop && (
@@ -1533,7 +1641,7 @@ function App() {
                     <span className="tx-step-name">Wallet Signature & Fee Balancing</span>
                     <span className="tx-step-badge" style={{ fontSize: 11, padding: '2px 8px', borderRadius: 999, background: 'rgba(56, 189, 248, 0.15)', color: '#7dd3fc' }}>✍️ Non-Custodial</span>
                   </div>
-                  <span className="tx-step-desc">Balancing unshielded fees (tNIGHT + DUST) and signing transaction via Lace Wallet</span>
+                  <span className="tx-step-desc">Balancing unshielded fees (tNIGHT + DUST) and signing transaction via {connectedWallet?.name || 'Midnight'} Wallet</span>
                 </div>
               </div>
 
@@ -1543,42 +1651,72 @@ function App() {
                 </div>
                 <div className="tx-step-info">
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-                    <span className="tx-step-name">Ledger Block Inclusion</span>
-                    <span className="tx-step-badge" style={{ fontSize: 11, padding: '2px 8px', borderRadius: 999, background: 'rgba(245, 158, 11, 0.15)', color: '#fcd34d' }}>⛓️ Midnight Preprod</span>
+                    <span className="tx-step-name">{isSandbox ? 'Local Sandbox Verification' : 'Ledger Block Inclusion'}</span>
+                    <span className="tx-step-badge" style={{ fontSize: 11, padding: '2px 8px', borderRadius: 999, background: isSandbox ? 'rgba(245, 158, 11, 0.15)' : 'rgba(245, 158, 11, 0.15)', color: '#fcd34d' }}>
+                      {isSandbox ? '🧪 Local Simulation' : '⛓️ Midnight Preprod'}
+                    </span>
                   </div>
-                  <span className="tx-step-desc">Transaction included in block; commitment recorded on-chain</span>
+                  <span className="tx-step-desc">
+                    {isSandbox ? 'Simulated state updated locally; no transaction submitted to ledger' : 'Transaction included in block; commitment recorded on-chain'}
+                  </span>
                 </div>
               </div>
             </div>
 
             {txProgress.step === 'done' && (
-              <div className="wallet-pop-details" style={{ borderColor: 'var(--emerald-border)', background: 'rgba(16, 185, 129, 0.08)' }}>
-                <p style={{ margin: 0, fontWeight: 600, color: 'var(--emerald)', fontSize: 14 }}>
-                  ✓ Transaction Confirmed on Midnight Ledger!
-                </p>
-                {txProgress.txId && (
-                  <div className="wallet-pop-row" style={{ marginTop: 8 }}>
-                    <span className="wallet-pop-label">Tx ID:</span>
-                    <span className="mono" style={{ cursor: 'pointer', color: 'var(--accent-light)' }} onClick={() => copyToClipboard(txProgress.txId!, 'Tx ID')}>
-                      {shortHex(txProgress.txId, 10, 8)} 📋
-                    </span>
+              isSandbox ? (
+                <div className="wallet-pop-details" style={{ borderColor: 'rgba(245, 158, 11, 0.4)', background: 'rgba(245, 158, 11, 0.08)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <span style={{ fontSize: 16 }}>🟡</span>
+                    <strong style={{ color: '#f59e0b', fontSize: 14 }}>
+                      Sandbox / Simulation
+                    </strong>
                   </div>
-                )}
-                {txProgress.blockHeight && (
+                  <p style={{ margin: '0 0 10px 0', color: 'var(--text-h)', fontSize: 13, lineHeight: 1.5 }}>
+                    Sandbox transaction simulated successfully — no transaction was submitted to Midnight Preprod.
+                  </p>
+                  {txProgress.commitment && (
+                    <div className="wallet-pop-row">
+                      <span className="wallet-pop-label">Commitment:</span>
+                      <span className="mono" style={{ cursor: 'pointer', color: 'var(--accent-light)' }} onClick={() => copyToClipboard(txProgress.commitment!, 'Commitment')}>
+                        {shortHex(txProgress.commitment, 10, 8)} 📋
+                      </span>
+                    </div>
+                  )}
                   <div className="wallet-pop-row">
-                    <span className="wallet-pop-label">Block Height:</span>
-                    <span className="wallet-pop-value">#{txProgress.blockHeight}</span>
+                    <span className="wallet-pop-label">Simulation Result:</span>
+                    <span className="wallet-pop-value" style={{ color: '#fcd34d' }}>Verified (No Gas / tDUST Used)</span>
                   </div>
-                )}
-                {txProgress.commitment && (
-                  <div className="wallet-pop-row">
-                    <span className="wallet-pop-label">Commitment:</span>
-                    <span className="mono" style={{ cursor: 'pointer', color: 'var(--accent-light)' }} onClick={() => copyToClipboard(txProgress.commitment!, 'Commitment')}>
-                      {shortHex(txProgress.commitment, 10, 8)} 📋
-                    </span>
-                  </div>
-                )}
-              </div>
+                </div>
+              ) : (
+                <div className="wallet-pop-details" style={{ borderColor: 'var(--emerald-border)', background: 'rgba(16, 185, 129, 0.08)' }}>
+                  <p style={{ margin: 0, fontWeight: 600, color: 'var(--emerald)', fontSize: 14 }}>
+                    ✓ Transaction Confirmed on Midnight Ledger!
+                  </p>
+                  {txProgress.txId && txProgress.txId !== 'Simulated' && (
+                    <div className="wallet-pop-row" style={{ marginTop: 8 }}>
+                      <span className="wallet-pop-label">Tx ID:</span>
+                      <span className="mono" style={{ cursor: 'pointer', color: 'var(--accent-light)' }} onClick={() => copyToClipboard(txProgress.txId!, 'Tx ID')}>
+                        {shortHex(txProgress.txId, 10, 8)} 📋
+                      </span>
+                    </div>
+                  )}
+                  {txProgress.blockHeight ? (
+                    <div className="wallet-pop-row">
+                      <span className="wallet-pop-label">Block Height:</span>
+                      <span className="wallet-pop-value">#{txProgress.blockHeight}</span>
+                    </div>
+                  ) : null}
+                  {txProgress.commitment && (
+                    <div className="wallet-pop-row">
+                      <span className="wallet-pop-label">Commitment:</span>
+                      <span className="mono" style={{ cursor: 'pointer', color: 'var(--accent-light)' }} onClick={() => copyToClipboard(txProgress.commitment!, 'Commitment')}>
+                        {shortHex(txProgress.commitment, 10, 8)} 📋
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )
             )}
 
             {txProgress.step === 'error' && (() => {
@@ -1669,6 +1807,7 @@ function Overview({
   userCredentialStatus,
   onCopy,
   onNavigateUser,
+  onConnectWallet,
   isSandbox,
 }: {
   status: ServerStatus | null
@@ -1680,6 +1819,7 @@ function Overview({
   userCredentialStatus: 'none' | 'pending' | 'approved' | 'revoked'
   onCopy: (text: string, label: string) => void
   onNavigateUser?: () => void
+  onConnectWallet?: () => void
   isSandbox: boolean
 }) {
   const pending = credentials.filter((c) => c.status === 'pending').length
@@ -1709,6 +1849,8 @@ function Overview({
     return true
   })
 
+  const activeCommitment = userCommitment || 'e5d4c3b2a19087e6d5c4b3a291807f6e5d4c3b2a19087e6d5c4b3a291807f6e5';
+
   return (
     <div className="overview">
       {!isSandbox && !state && (
@@ -1726,12 +1868,12 @@ function Overview({
         }}>
           <span>🌐</span>
           <span>
-            <strong>Midnight Preprod Mode:</strong> Live on-chain contract state is loading from the Midnight network (Contract <code className="mono">1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0</code>). Connect Lace Wallet or deploy the permanent API backend to submit on-chain transactions.
+            <strong>Midnight Preprod Mode:</strong> Live on-chain contract state is loading from the Midnight network (Contract <code className="mono">1387bebdf07d4f8d5d9cc5d5f8e1e27db2a3a37e3b144daf4ec2413d5374abc0</code>). Connect Lace or 1AM Wallet or deploy the permanent API backend to submit on-chain transactions.
           </span>
         </div>
       )}
 
-      {/* ── 1. Live Metrics Bar ── */}
+      {/* ── 1. Live Metrics Bar (Professional SVG Icons) ── */}
       <div className="metrics-grid">
         <div className="metric-card purple">
           <div className="metric-card-inner">
@@ -1740,7 +1882,9 @@ function Overview({
               <div className="metric-value">{credentials.length}</div>
               <div className="metric-sub">{isSandbox ? 'Across Sandbox Registries' : (state ? 'On-Chain Ledger State' : 'Connecting to Preprod...')}</div>
             </div>
-            <div className="metric-icon-wrap">🛡️</div>
+            <div className="metric-icon-wrap" title="Total KYC Passports Issued">
+              <ShieldCheckIcon size={24} />
+            </div>
           </div>
         </div>
 
@@ -1751,7 +1895,9 @@ function Overview({
               <div className="metric-value">{approved}</div>
               <div className="metric-sub">✓ Ready for ZK Proving</div>
             </div>
-            <div className="metric-icon-wrap">✨</div>
+            <div className="metric-icon-wrap" title="Approved & Compliant Credentials">
+              <BadgeCheckIcon size={24} />
+            </div>
           </div>
         </div>
 
@@ -1762,7 +1908,9 @@ function Overview({
               <div className="metric-value">{pending}</div>
               <div className="metric-sub">⏳ In Review Queue</div>
             </div>
-            <div className="metric-icon-wrap">⚖️</div>
+            <div className="metric-icon-wrap" title="Pending Regulatory Verification">
+              <ScaleIcon size={24} />
+            </div>
           </div>
         </div>
 
@@ -1773,8 +1921,64 @@ function Overview({
               <div className="metric-value">{state ? formatCount(state.eligibilityCount) : (isSandbox ? '48' : '0')}</div>
               <div className="metric-sub">⚡ Zero Knowledge Leaked</div>
             </div>
-            <div className="metric-icon-wrap">🔒</div>
+            <div className="metric-icon-wrap" title="Verified Zero-Knowledge Proofs">
+              <LockKeyholeIcon size={24} />
+            </div>
           </div>
+        </div>
+      </div>
+
+      {/* ── Primary User Action Callout (Clear "What Should I Do Next?") ── */}
+      <div className="primary-action-card">
+        <div className="primary-action-info">
+          <div className="primary-action-tag">
+            {!connectedWallet && !isSandbox ? 'Step 1: Get Started' :
+             userCredentialStatus === 'none' ? 'Step 2: KYC Verification' :
+             userCredentialStatus === 'pending' ? 'Step 3: Review Queue' :
+             userCredentialStatus === 'approved' ? 'Step 4: Prove Eligibility' : 'Status: Revoked'}
+          </div>
+          <h3 className="primary-action-title">
+            {!connectedWallet && !isSandbox ? 'Connect Wallet to Begin Verification' :
+             userCredentialStatus === 'none' ? (isSandbox ? 'Request Your KYC Credential (Sandbox)' : 'Request Your KYC Credential') :
+             userCredentialStatus === 'pending' ? 'Verification Pending Authority Review' :
+             userCredentialStatus === 'approved' ? 'Prove Compliance with Zero-Knowledge' : 'Credential Revoked'}
+          </h3>
+          <p className="primary-action-desc">
+            {!connectedWallet && !isSandbox
+              ? 'Connect your Lace or 1AM Midnight wallet to bind your cryptographic identity witness and prove compliance without revealing personal data.'
+              : userCredentialStatus === 'none'
+              ? (isSandbox
+                ? 'Sandbox Mode active. No wallet or tDUST required. Submit your simulated identity commitment to test the KYC lifecycle.'
+                : 'Your wallet is connected. Submit your private identity commitment to the Midnight ledger for compliance verification.')
+              : userCredentialStatus === 'pending'
+              ? 'Your commitment has been submitted. The compliance authority will review and approve your KYC status.'
+              : userCredentialStatus === 'approved'
+              ? 'Your credential is fully approved. Generate a ZK-SNARK proof demonstrating compliance with zero PII disclosure.'
+              : 'Your previous credential has been revoked by compliance authorities. You may generate a new commitment to re-verify.'}
+          </p>
+        </div>
+        <div className="primary-action-btn-wrap">
+          {!connectedWallet && !isSandbox ? (
+            <button className="btn btn-primary btn-large glow-btn" onClick={onConnectWallet}>
+              Connect Wallet
+            </button>
+          ) : userCredentialStatus === 'none' ? (
+            <button className="btn btn-primary btn-large glow-btn" onClick={onNavigateUser}>
+              Request Credential ➔
+            </button>
+          ) : userCredentialStatus === 'pending' ? (
+            <button className="btn btn-secondary btn-large" onClick={onNavigateUser}>
+              View Verification Status ➔
+            </button>
+          ) : userCredentialStatus === 'approved' ? (
+            <button className="btn btn-primary btn-large glow-btn" onClick={onNavigateUser}>
+              Prove Eligibility ➔
+            </button>
+          ) : (
+            <button className="btn btn-primary btn-large glow-btn" onClick={onNavigateUser}>
+              Request New Credential ➔
+            </button>
+          )}
         </div>
       </div>
 
@@ -1805,17 +2009,19 @@ function Overview({
           <div className="holo-body">
             <div className="holo-commitment-box">
               <div>
-                <div className="holo-commitment-label">Zero-Knowledge Credential Commitment (SHA-256)</div>
-                <div className="holo-commitment-val mono">
-                  {userCommitment ? userCommitment : 'e5d4c3b2a19087e6d5c4b3a291807f6e5d4c3b2a19087e6d5c4b3a291807f6e5'}
+                <div className="holo-commitment-label">Credential Commitment</div>
+                <div className="holo-commitment-val mono" title={activeCommitment}>
+                  {shortHex(activeCommitment, 12, 10)}
                 </div>
               </div>
               <button
                 className="btn btn-icon"
-                onClick={() => onCopy(userCommitment || 'e5d4c3b2a19087e6d5c4b3a291807f6e5d4c3b2a19087e6d5c4b3a291807f6e5', 'Credential Commitment')}
-                title="Copy Credential Commitment"
+                onClick={() => onCopy(activeCommitment, 'Credential Commitment')}
+                title="Copy full 64-character commitment hash"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 14px' }}
               >
-                📋
+                <CopyIcon size={14} />
+                <span style={{ fontSize: 12 }}>Copy</span>
               </button>
             </div>
 
@@ -1839,16 +2045,25 @@ function Overview({
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-s)' }}>
               <span>Account:</span>
               <span className="mono" style={{ color: '#fff' }}>
-                {connectedWallet ? `${connectedWallet.name} (${shortHex(connectedWallet.address, 6, 4)})` : 'Demo Pass (Connect Wallet to Bind)'}
+                {connectedWallet
+                  ? `${connectedWallet.name} (${shortHex(connectedWallet.address, 6, 4)})`
+                  : isSandbox
+                  ? 'Sandbox Simulated Account'
+                  : 'Demo Pass (Connect Wallet to Bind)'}
               </span>
             </div>
             <div>
-              {onNavigateUser && (
+              {!connectedWallet && !isSandbox ? (
+                <button className="btn btn-primary" onClick={onConnectWallet}>
+                  Connect Wallet
+                </button>
+              ) : onNavigateUser && (
                 <button
-                  className="btn btn-small btn-primary"
+                  className="btn btn-primary"
                   onClick={onNavigateUser}
                 >
-                  {userCredentialStatus === 'approved' ? '⚡ Prove Eligibility On-Chain' : '➕ Complete KYC Verification'}
+                  {userCredentialStatus === 'approved' ? '⚡ Prove Eligibility On-Chain' :
+                   userCredentialStatus === 'pending' ? '⏳ Check Verification Status' : 'Request Credential'}
                 </button>
               )}
             </div>
@@ -2126,6 +2341,7 @@ function UserActions({
   onProve,
   onCustomProve,
   onCopy,
+  isSandbox,
 }: {
   busy: string | null
   credentials: CredentialEntry[]
@@ -2138,6 +2354,7 @@ function UserActions({
   onProve: (commitment: string) => void
   onCustomProve: () => void
   onCopy: (text: string, label: string) => void
+  isSandbox: boolean
 }) {
   const approved = credentials.filter((c) => c.status === 'approved')
   const [activeStep, setActiveStep] = useState<1 | 2 | 3 | 4>(
@@ -2257,7 +2474,7 @@ function UserActions({
           <div className="privacy-note">
             <span className="privacy-icon">🔒</span>
             <p>
-              <strong>Device-Bound Security:</strong> When connected via Lace Wallet, a unique deterministic witness is derived directly
+              <strong>Device-Bound Security:</strong> When connected via {connectedWallet?.name || 'Lace or 1AM'} Wallet, a unique deterministic witness is derived directly
               for your account address. When running via Relayer or Sandbox, this secret creates your one-way commitment.
             </p>
           </div>
@@ -2281,24 +2498,31 @@ function UserActions({
 
           <div className="holo-commitment-box" style={{ marginBottom: 18 }}>
             <div>
-              <div className="holo-commitment-label">Derived 32-Byte Commitment:</div>
-              <div className="holo-commitment-val mono">
-                {userCommitment || 'e5d4c3b2a19087e6d5c4b3a291807f6e5d4c3b2a19087e6d5c4b3a291807f6e5'}
+              <div className="holo-commitment-label">Credential Commitment</div>
+              <div className="holo-commitment-val mono" title={userCommitment || 'e5d4c3b2a19087e6d5c4b3a291807f6e5d4c3b2a19087e6d5c4b3a291807f6e5'}>
+                {shortHex(userCommitment || 'e5d4c3b2a19087e6d5c4b3a291807f6e5d4c3b2a19087e6d5c4b3a291807f6e5', 12, 10)}
               </div>
             </div>
             <button
               className="btn btn-icon"
-              onClick={() => onCopy(userCommitment || 'e5d4c3b2a19087e6d5c4b3a291807f6e5d4c3b2a19087e6d5c4b3a291807f6e5', 'Commitment')}
+              onClick={() => onCopy(userCommitment || 'e5d4c3b2a19087e6d5c4b3a291807f6e5d4c3b2a19087e6d5c4b3a291807f6e5', 'Credential Commitment')}
+              title="Copy full 64-character commitment hash"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 14px' }}
             >
-              📋
+              <CopyIcon size={14} />
+              <span style={{ fontSize: 12 }}>Copy</span>
             </button>
           </div>
 
-          {connectedWallet && (
+          {connectedWallet ? (
             <p style={{ fontSize: '13px', color: 'var(--emerald)', marginBottom: '14px' }}>
               💳 Connected via <strong>{connectedWallet.name}</strong> ({shortHex(connectedWallet.address, 8, 6)}).
             </p>
-          )}
+          ) : isSandbox ? (
+            <p style={{ fontSize: '13px', color: '#fcd34d', marginBottom: '14px', background: 'rgba(245, 158, 11, 0.1)', padding: '8px 12px', borderRadius: 8, border: '1px solid rgba(245, 158, 11, 0.25)' }}>
+              🟡 <strong>Sandbox Simulation Mode:</strong> No wallet connection or tDUST required. Simulated commitment will be verified locally.
+            </p>
+          ) : null}
 
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
             <button
@@ -2714,18 +2938,24 @@ function AuditTab({
                 </div>
                 <div className="history-body">{item.message}</div>
                 <div className="history-meta">
-                  <span>Block: #{item.blockHeight}</span>
-                  <span>
-                    Tx ID:{' '}
-                    <code
-                      className="mono"
-                      style={{ cursor: 'pointer', color: 'var(--accent-light)' }}
-                      onClick={() => onCopy(item.txId, 'Tx ID')}
-                      title="Click to copy full transaction ID"
-                    >
-                      {shortHex(item.txId, 10, 8)} 📋
-                    </code>
-                  </span>
+                  {item.txId === 'Simulated' || !item.blockHeight ? (
+                    <span style={{ color: '#f59e0b', fontWeight: 600 }}>Mode: Sandbox Simulation (No On-Chain Tx)</span>
+                  ) : (
+                    <>
+                      <span>Block: #{item.blockHeight}</span>
+                      <span>
+                        Tx ID:{' '}
+                        <code
+                          className="mono"
+                          style={{ cursor: 'pointer', color: 'var(--accent-light)' }}
+                          onClick={() => onCopy(item.txId, 'Tx ID')}
+                          title="Click to copy full transaction ID"
+                        >
+                          {shortHex(item.txId, 10, 8)} 📋
+                        </code>
+                      </span>
+                    </>
+                  )}
                   {item.commitment && (
                     <span>
                       Commitment:{' '}

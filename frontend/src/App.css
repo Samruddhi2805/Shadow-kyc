@@ -37,6 +37,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
   width: 48px;
   height: 48px;
   background: var(--accent-bg);
@@ -59,6 +60,14 @@
   color: var(--text);
   margin: 2px 0 0;
   font-weight: 500;
+}
+
+.tagline-sub {
+  font-size: 11px;
+  color: var(--text-s);
+  margin: 2px 0 0;
+  font-weight: 500;
+  letter-spacing: 0.02em;
 }
 
 .header-meta {
@@ -1199,27 +1208,84 @@
   flex-wrap: wrap;
   gap: 12px;
   padding: 10px 24px;
-  background: linear-gradient(90deg, rgba(139, 92, 246, 0.18) 0%, rgba(6, 182, 212, 0.14) 100%);
   border-bottom: 1px solid var(--accent-border);
   font-size: 13px;
   color: #e2e8f0;
+  transition: all 0.25s ease;
+}
+
+.sandbox-banner.live-active {
+  background: linear-gradient(90deg, rgba(16, 185, 129, 0.12) 0%, rgba(6, 182, 212, 0.1) 100%);
+  border-bottom: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.sandbox-banner.sandbox-active {
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.15) 0%, rgba(217, 119, 6, 0.1) 100%);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.35);
 }
 
 .sandbox-banner-left {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
+  flex-wrap: wrap;
 }
 
-.sandbox-tag {
-  background: var(--accent);
-  color: #fff;
-  font-weight: 700;
+.mode-selector-pill {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 20px;
+  padding: 2px 6px;
+  gap: 4px;
+}
+
+.mode-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-s);
   font-size: 11px;
-  padding: 3px 8px;
-  border-radius: 6px;
-  text-transform: uppercase;
+  font-weight: 700;
   letter-spacing: 0.05em;
+  padding: 5px 12px;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mode-btn:hover {
+  color: #fff;
+}
+
+.mode-btn.active.live {
+  background: var(--emerald-bg);
+  border: 1px solid var(--emerald-border);
+  color: var(--emerald-light);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.25);
+}
+
+.mode-btn.active.sandbox {
+  background: rgba(245, 158, 11, 0.2);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #fcd34d;
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.25);
+}
+
+.mode-divider {
+  color: rgba(255, 255, 255, 0.2);
+  font-size: 12px;
+  user-select: none;
+}
+
+.mode-status-text {
+  font-size: 13px;
+  color: #e2e8f0;
+}
+
+.mode-meta-dot {
+  margin: 0 6px;
+  color: rgba(255, 255, 255, 0.3);
 }
 
 .sandbox-controls {
@@ -1228,27 +1294,10 @@
   gap: 8px;
 }
 
-.btn-sandbox {
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid var(--glass-border-bright);
-  color: #fff;
-  padding: 5px 12px;
-  border-radius: 8px;
+.mode-badge-note {
   font-size: 12px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.btn-sandbox:hover {
-  background: rgba(255, 255, 255, 0.2);
-  transform: translateY(-1px);
-}
-
-.btn-sandbox.active {
-  background: var(--emerald-bg);
-  border-color: var(--emerald-border);
-  color: var(--emerald-light);
-  font-weight: 600;
+  color: var(--text-s);
+  font-family: var(--mono);
 }
 
 /* ─── Live Metrics Grid ─────────────────────────────────────────────────── */
@@ -1342,6 +1391,107 @@
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+/* ─── Primary User Action Callout ─────────────────────────────────────────── */
+.primary-action-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 22px 28px;
+  margin-bottom: 24px;
+  background: linear-gradient(135deg, rgba(22, 30, 52, 0.75) 0%, rgba(13, 18, 33, 0.92) 100%);
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  border-radius: 16px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45), 0 0 25px rgba(139, 92, 246, 0.15);
+  position: relative;
+  overflow: hidden;
+}
+
+.primary-action-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 100%;
+  background: linear-gradient(180deg, var(--accent) 0%, var(--cyan) 100%);
+}
+
+.primary-action-info {
+  flex: 1;
+}
+
+.primary-action-tag {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--cyan-light);
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.primary-action-title {
+  font-family: var(--heading);
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+  margin: 0 0 4px 0;
+  letter-spacing: -0.01em;
+}
+
+.primary-action-desc {
+  font-size: 13.5px;
+  color: var(--text);
+  margin: 0;
+  line-height: 1.45;
+  max-width: 720px;
+}
+
+.primary-action-btn-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.btn-large {
+  padding: 12px 24px;
+  font-size: 14.5px;
+  font-weight: 700;
+  border-radius: 12px;
+}
+
+.glow-btn {
+  background: linear-gradient(135deg, var(--accent) 0%, #6366f1 100%);
+  border: 1px solid var(--accent-light);
+  box-shadow: 0 0 20px var(--accent-glow);
+  transition: all 0.2s ease;
+}
+
+.glow-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 0 30px var(--accent-glow);
+}
+
+@media (max-width: 768px) {
+  .primary-action-card {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 18px 20px;
+    gap: 16px;
+  }
+  .primary-action-btn-wrap {
+    width: 100%;
+  }
+  .primary-action-btn-wrap .btn {
+    width: 100%;
+    justify-content: center;
+  }
 }
 
 /* ─── Holographic KYC Credential Pass ───────────────────────────────────── */

@@ -233,6 +233,40 @@ cp .env.example .env
 
 ---
 
+## 🧪 Operating Modes: Live Preprod vs. Sandbox Mode
+
+Shadow-KYC provides two operating modes designed to serve both production on-chain verification and frictionless demonstration:
+
+```text
+┌──────────────────────────────────────────────┬──────────────────────────────────────────────┐
+│             🟢 LIVE PREPROD MODE             │              🟡 SANDBOX MODE                 │
+├──────────────────────────────────────────────┼──────────────────────────────────────────────┤
+│ • Real Midnight Preprod blockchain           │ • Local client-side simulation               │
+│ • Requires Lace Wallet or 1AM Wallet         │ • No wallet connection required              │
+│ • Requires spendable tDUST for fees          │ • No tDUST required                          │
+│ • Real client-side ZK-SNARK proofs           │ • Simulated ZK state & verification          │
+│ • Real on-chain ledger state (Block #2126833)│ • In-memory simulated ledger registry        │
+│ • Verifiable transaction hash (Tx ID)        │ • Explicitly labeled: "Sandbox / Simulation" │
+└──────────────────────────────────────────────┴──────────────────────────────────────────────┘
+```
+
+### 1. Live Preprod Mode
+- **Requires spendable tDUST:** Transaction submission on Midnight Preprod requires unshielded tDUST to balance transaction fees. If your wallet has 0 spendable tDUST, transaction fee balancing will fail with an informative notification and recovery tips (e.g. generating DUST in Lace or receiving a transaction).
+- **No silent fallbacks:** Live Mode will never silently switch the user to Sandbox Mode upon fee or network failure.
+- **Real ZK proofs & on-chain state:** Real Compact circuits are proven client-side, signed via the connected non-custodial wallet (Lace or 1AM), and recorded permanently on the Midnight Preprod ledger.
+
+### 2. Sandbox Mode (Simulation)
+- **Zero prerequisites:** Designed for demonstrations, reviewers, and automated evaluations when spendable tDUST or a Midnight wallet extension is unavailable.
+- **No on-chain submission:** Sandbox Mode **does not submit any transactions to Midnight Preprod**.
+- **Accurate representation:** Sandbox results are strictly simulated locally and must **not** be represented as on-chain transactions. Receipts clearly display **"Sandbox / Simulation"** and state **"Sandbox transaction simulated successfully — no transaction was submitted to Midnight Preprod."**
+- **Interactive lifecycle:** Users can execute the complete 4-step KYC journey: derive a local secret witness, request credential issuance, approve credentials in the compliance authority queue, and prove eligibility with simulated zero-knowledge compliance.
+
+### How to Switch Modes
+- **In the UI:** Click the **LIVE PREPROD | SANDBOX** toggle switch located at the top banner of the application.
+- **Via URL Parameter:** Append `?sandbox=true` or `?mode=sandbox` to the URL (e.g., `http://localhost:5173/?sandbox=true` or `https://shadow-kyc.vercel.app/?sandbox=true`).
+
+---
+
 ## 🚀 Deployment Architecture
 
 Shadow-KYC supports two clearly separated environments:
