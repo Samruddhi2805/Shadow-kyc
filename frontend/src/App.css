@@ -15,9 +15,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 18px 36px;
+  padding: 14px 28px;
   border-bottom: 1px solid var(--glass-border);
-  background: rgba(11, 15, 25, 0.8);
+  background: rgba(11, 15, 25, 0.85);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   position: sticky;
@@ -38,18 +38,19 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 48px;
-  height: 48px;
+  width: 44px;
+  height: 44px;
   background: var(--accent-bg);
   border: 1px solid var(--accent-border);
-  border-radius: 14px;
-  box-shadow: 0 0 20px var(--accent-glow);
+  border-radius: 12px;
+  box-shadow: 0 0 12px rgba(139, 92, 246, 0.2);
 }
 
 .brand h1 {
-  font-size: 22px;
+  font-size: 20px;
+  font-weight: 800;
   margin: 0;
-  letter-spacing: -0.02em;
+  letter-spacing: 0.04em;
   background: linear-gradient(135deg, #ffffff 30%, var(--accent-light) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -467,6 +468,12 @@
   box-shadow: 0 0 8px currentColor;
 }
 
+.status-dot-neutral {
+  background: var(--text-s);
+  color: var(--text-s);
+  box-shadow: none;
+}
+
 .status-pending .status-dot { background: var(--amber); color: var(--amber); }
 .status-approved .status-dot { background: var(--emerald); color: var(--emerald); }
 .status-revoked .status-dot { background: var(--rose); color: var(--rose); }
@@ -501,21 +508,28 @@
   background: var(--glass-bg);
   color: var(--text-h);
   font-family: var(--heading);
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 600;
-  padding: 12px 22px;
-  border-radius: 12px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 18px;
+  border-radius: 10px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  transition: all 0.2s ease;
+  line-height: 1;
+  text-decoration: none;
+  box-sizing: border-box;
+  white-space: nowrap;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .btn:hover:not(:disabled) {
   border-color: var(--accent-border);
-  box-shadow: 0 0 15px var(--accent-glow);
+  background: rgba(139, 92, 246, 0.15);
+  color: #ffffff;
   transform: translateY(-1px);
 }
 
@@ -524,20 +538,22 @@
 }
 
 .btn:disabled {
-  opacity: 0.5;
+  opacity: 0.55;
   cursor: not-allowed;
+  pointer-events: none;
 }
 
 .btn-primary {
-  background: var(--accent);
-  border-color: var(--accent-light);
+  background: linear-gradient(135deg, #7c3aed 0%, #6366f1 100%);
+  border-color: rgba(192, 132, 252, 0.45);
   color: #ffffff;
-  box-shadow: 0 4px 15px var(--accent-glow);
+  box-shadow: 0 4px 14px rgba(124, 58, 237, 0.3);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: #7c3aed;
-  border-color: #a78bfa;
+  background: linear-gradient(135deg, #6d28d9 0%, #4f46e5 100%);
+  border-color: rgba(192, 132, 252, 0.65);
+  box-shadow: 0 6px 18px rgba(124, 58, 237, 0.4);
 }
 
 .btn-secondary {
@@ -546,11 +562,27 @@
   background: var(--accent-bg);
 }
 
+.btn-secondary:hover:not(:disabled) {
+  background: rgba(139, 92, 246, 0.25);
+  border-color: var(--accent-light);
+  color: #ffffff;
+}
+
 .btn-small {
-  padding: 7px 16px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 12px;
   font-size: 12.5px;
   border-radius: 8px;
-  margin-left: auto;
+}
+
+.btn-large {
+  height: 46px;
+  min-height: 46px;
+  padding: 0 22px;
+  font-size: 15px;
+  font-weight: 700;
+  border-radius: 10px;
 }
 
 .btn-approve {
@@ -559,7 +591,8 @@
   background: var(--emerald-bg);
 }
 .btn-approve:hover:not(:disabled) {
-  box-shadow: 0 0 15px rgba(16, 185, 129, 0.4);
+  background: rgba(16, 185, 129, 0.22);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25);
 }
 
 .btn-danger {
@@ -568,12 +601,16 @@
   background: var(--rose-bg);
 }
 .btn-danger:hover:not(:disabled) {
-  box-shadow: 0 0 15px rgba(244, 63, 94, 0.4);
+  background: rgba(244, 63, 94, 0.22);
+  box-shadow: 0 4px 12px rgba(244, 63, 94, 0.25);
 }
 
 .btn-icon {
-  padding: 6px 10px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 10px;
   font-size: 12px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.05);
   border-color: var(--glass-border);
 }
@@ -706,6 +743,37 @@
   color: #d8b4fe;
 }
 
+/* ─── Empty State ───────────────────────────────────────────────────────────── */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 36px 24px;
+  background: rgba(13, 18, 33, 0.45);
+  border: 1px dashed var(--glass-border);
+  border-radius: 14px;
+  color: var(--text-s);
+  font-size: 13.5px;
+  text-align: center;
+  margin: 12px 0;
+}
+
+.empty::before {
+  content: '';
+  display: block;
+  width: 42px;
+  height: 42px;
+  background-image: url('/favicon.svg');
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  opacity: 0.35;
+  filter: drop-shadow(0 0 8px rgba(139, 92, 246, 0.25));
+}
+
 /* ─── Footer ────────────────────────────────────────────────────────────────── */
 
 .app-footer {
@@ -739,7 +807,7 @@
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
-  box-shadow: 0 0 20px var(--accent-glow);
+  box-shadow: 0 0 16px var(--accent-glow);
 }
 
 @keyframes spin {
@@ -752,22 +820,52 @@
   .zk-workflow {
     grid-template-columns: 1fr;
   }
+
+  .zk-interactive-flow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .zk-flow-arrow {
+    transform: rotate(90deg);
+    padding: 4px 0;
+  }
 }
 
 @media (max-width: 768px) {
   .app-header {
     flex-direction: column;
     align-items: flex-start;
-    padding: 16px 20px;
+    padding: 14px 18px;
+    gap: 14px;
+  }
+
+  .header-meta {
+    width: 100%;
+    justify-content: flex-start;
+    gap: 8px;
   }
 
   .tabs {
-    padding: 10px 20px;
+    padding: 8px 16px;
     overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tab {
+    white-space: nowrap;
+    flex-shrink: 0;
+    padding: 8px 16px;
+    font-size: 13.5px;
   }
 
   .content {
-    padding: 20px;
+    padding: 16px;
   }
 
   .stat-grid {
@@ -778,8 +876,25 @@
     grid-template-columns: 1fr;
   }
 
+  .metrics-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
   .inline-form {
     flex-direction: column;
+  }
+
+  .wallet-modal {
+    width: 95%;
+    margin: 12px;
+  }
+
+  .wallet-pop-card,
+  .tx-modal-card {
+    width: 95%;
+    max-width: 95vw;
+    padding: 20px;
   }
 }
 
@@ -1316,13 +1431,13 @@
   position: relative;
   overflow: hidden;
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
 }
 
 .metric-card:hover {
-  transform: translateY(-3px);
+  transform: translateY(-2px);
   border-color: var(--accent-border);
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5), 0 0 20px var(--accent-glow);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
 .metric-card-inner {
@@ -1341,6 +1456,7 @@
   justify-content: center;
   font-size: 22px;
   background: rgba(255, 255, 255, 0.05);
+  flex-shrink: 0;
 }
 
 .metric-card.purple .metric-icon-wrap {
@@ -1368,7 +1484,7 @@
 }
 
 .metric-label {
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -1377,11 +1493,12 @@
 }
 
 .metric-value {
-  font-size: 28px;
+  font-size: 32px;
   font-weight: 800;
   color: var(--text-h);
   line-height: 1.1;
   font-family: var(--heading);
+  letter-spacing: -0.02em;
 }
 
 .metric-sub {
@@ -1659,20 +1776,20 @@
   font-size: 12px;
 }
 
-/* ─── Interactive ZK Circuit Flowchart ──────────────────────────────────── */
+/* ─── Verification Workflow (5-Step Progression) ────────────────────────── */
 .zk-interactive-flow {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
   margin: 24px 0;
   overflow-x: auto;
-  padding: 8px 4px;
+  padding: 6px 2px;
 }
 
 .zk-flow-card {
   flex: 1;
-  min-width: 170px;
+  min-width: 175px;
   background: rgba(13, 18, 33, 0.85);
   border: 1px solid var(--glass-border);
   border-radius: 14px;
@@ -1685,9 +1802,28 @@
 }
 
 .zk-flow-card:hover {
-  transform: translateY(-3px);
+  transform: translateY(-2px);
   border-color: var(--accent-border);
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+}
+
+.zk-flow-card.flow-idle {
+  border-left: 3px solid rgba(255, 255, 255, 0.2);
+}
+
+.zk-flow-card.flow-processing {
+  border-left: 3px solid var(--amber);
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(13, 18, 33, 0.9) 100%);
+}
+
+.zk-flow-card.flow-success {
+  border-left: 3px solid var(--emerald);
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(13, 18, 33, 0.9) 100%);
+}
+
+.zk-flow-card.flow-error {
+  border-left: 3px solid var(--rose);
+  background: linear-gradient(135deg, rgba(244, 63, 94, 0.08) 0%, rgba(13, 18, 33, 0.9) 100%);
 }
 
 .zk-flow-card.private {
@@ -1702,10 +1838,48 @@
   border-left: 3px solid var(--emerald);
 }
 
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  line-height: 1.4;
+}
+
+.badge-idle {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-s);
+}
+
+.badge-processing {
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #fcd34d;
+}
+
+.badge-success {
+  background: var(--emerald-bg);
+  border: 1px solid var(--emerald-border);
+  color: var(--emerald);
+}
+
+.badge-error {
+  background: var(--rose-bg);
+  border: 1px solid var(--rose-border);
+  color: var(--rose);
+}
+
 .zk-flow-badge-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 6px;
 }
 
 .zk-flow-num {
@@ -1717,9 +1891,12 @@
 
 .zk-flow-arrow {
   color: var(--accent-light);
-  font-size: 18px;
+  font-size: 16px;
   font-weight: bold;
   opacity: 0.7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .zk-flow-card h4 {
@@ -1731,9 +1908,9 @@
 
 .zk-flow-card p {
   margin: 0;
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--text);
-  line-height: 1.4;
+  line-height: 1.45;
 }
 
 /* ─── Guided Stepper Journey ────────────────────────────────────────────── */

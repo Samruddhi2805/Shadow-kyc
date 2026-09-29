@@ -1270,8 +1270,8 @@ function App() {
             <ShadowKycLogo width={32} height={32} />
           </div>
           <div>
-            <h1>Shadow-KYC</h1>
-            <p className="tagline">Privacy-Preserving KYC &amp; AML</p>
+            <h1>SHADOW-KYC</h1>
+            <p className="tagline">Privacy-Preserving Compliance Infrastructure</p>
             <p className="tagline-sub">Powered by Midnight Network</p>
           </div>
         </div>
@@ -1310,8 +1310,9 @@ function App() {
             </>
           ) : (
             <>
-              <span className="pill pill-err">
-                🔴 Wallet Not Connected
+              <span className="pill pill-neutral">
+                <span className="status-dot status-dot-neutral" />
+                Wallet Not Connected
               </span>
               {balance && (
                 <span className="pill pill-neutral">
@@ -1878,11 +1879,11 @@ function Overview({
         <div className="metric-card purple">
           <div className="metric-card-inner">
             <div>
-              <div className="metric-label">Total KYC Passports</div>
+              <div className="metric-label">KYC Credentials</div>
               <div className="metric-value">{credentials.length}</div>
-              <div className="metric-sub">{isSandbox ? 'Across Sandbox Registries' : (state ? 'On-Chain Ledger State' : 'Connecting to Preprod...')}</div>
+              <div className="metric-sub">{isSandbox ? 'Sandbox' : (state ? 'On-Chain Ledger' : 'Midnight Preprod')}</div>
             </div>
-            <div className="metric-icon-wrap" title="Total KYC Passports Issued">
+            <div className="metric-icon-wrap" title="Total KYC Credentials">
               <ShieldCheckIcon size={24} />
             </div>
           </div>
@@ -1893,7 +1894,7 @@ function Overview({
             <div>
               <div className="metric-label">Approved & Compliant</div>
               <div className="metric-value">{approved}</div>
-              <div className="metric-sub">✓ Ready for ZK Proving</div>
+              <div className="metric-sub">Verified</div>
             </div>
             <div className="metric-icon-wrap" title="Approved & Compliant Credentials">
               <BadgeCheckIcon size={24} />
@@ -1904,11 +1905,11 @@ function Overview({
         <div className="metric-card amber">
           <div className="metric-card-inner">
             <div>
-              <div className="metric-label">Pending Authority</div>
+              <div className="metric-label">Pending Review</div>
               <div className="metric-value">{pending}</div>
-              <div className="metric-sub">⏳ In Review Queue</div>
+              <div className="metric-sub">Authority Review</div>
             </div>
-            <div className="metric-icon-wrap" title="Pending Regulatory Verification">
+            <div className="metric-icon-wrap" title="Pending Review">
               <ScaleIcon size={24} />
             </div>
           </div>
@@ -1919,7 +1920,7 @@ function Overview({
             <div>
               <div className="metric-label">ZK Proofs Verified</div>
               <div className="metric-value">{state ? formatCount(state.eligibilityCount) : (isSandbox ? '48' : '0')}</div>
-              <div className="metric-sub">⚡ Zero Knowledge Leaked</div>
+              <div className="metric-sub">Privacy Preserved</div>
             </div>
             <div className="metric-icon-wrap" title="Verified Zero-Knowledge Proofs">
               <LockKeyholeIcon size={24} />
@@ -2071,55 +2072,76 @@ function Overview({
         </div>
       </div>
 
-      {/* ── 3. Interactive ZK Circuit Flowchart ── */}
+      {/* ── 3. Verification Workflow Progression ── */}
       <section className="card">
-        <h2>Zero-Knowledge Architecture & Privacy Guarantees</h2>
+        <h2>Zero-Knowledge Verification Workflow</h2>
         <p>
           Shadow-KYC utilizes Midnight Compact smart contracts to provide institutional-grade regulatory compliance
-          while guaranteeing 100% cryptographic privacy for end-users.
+          while guaranteeing cryptographic privacy for end-users.
         </p>
 
         <div className="zk-interactive-flow">
-          <div className="zk-flow-card private">
+          <div className={`zk-flow-card ${connectedWallet || isSandbox ? 'flow-success' : 'flow-idle'}`}>
             <div className="zk-flow-badge-row">
-              <span className="zk-flow-num">PHASE 1</span>
-              <span className="pill pill-ok" style={{ fontSize: 10, padding: '2px 8px' }}>Private Witness</span>
+              <span className="zk-flow-num">STEP 1</span>
+              <span className={`status-badge ${connectedWallet || isSandbox ? 'badge-success' : 'badge-idle'}`}>
+                {connectedWallet || isSandbox ? '✓ Success' : '● Idle'}
+              </span>
             </div>
-            <h4>Local Identity Secret</h4>
-            <p>Your secret identity witness (<code className="mono">localSecret</code>) is created and kept on your machine. Never sent to any server or ledger.</p>
+            <h4>Connect Wallet</h4>
+            <p>Connect your Lace or 1AM Midnight wallet to derive local cryptographic identity witnesses.</p>
           </div>
 
           <div className="zk-flow-arrow">➔</div>
 
-          <div className="zk-flow-card public">
+          <div className={`zk-flow-card ${userCredentialStatus !== 'none' || credentials.some(c => c.commitment === userCommitment) ? 'flow-success' : 'flow-idle'}`}>
             <div className="zk-flow-badge-row">
-              <span className="zk-flow-num">PHASE 2</span>
-              <span className="pill pill-neutral" style={{ fontSize: 10, padding: '2px 8px' }}>Cryptographic Hash</span>
+              <span className="zk-flow-num">STEP 2</span>
+              <span className={`status-badge ${userCredentialStatus !== 'none' || credentials.some(c => c.commitment === userCommitment) ? 'badge-success' : 'badge-idle'}`}>
+                {userCredentialStatus !== 'none' || credentials.some(c => c.commitment === userCommitment) ? '✓ Success' : '● Idle'}
+              </span>
             </div>
-            <h4>One-Way Commitment</h4>
-            <p>Hash function computes <code className="mono">persistentHash(localSecret)</code>. Irreversible 32-byte representation.</p>
+            <h4>KYC Credential</h4>
+            <p>Compute one-way persistentHash witness and register credential commitment on-chain.</p>
           </div>
 
           <div className="zk-flow-arrow">➔</div>
 
-          <div className="zk-flow-card contract">
+          <div className={`zk-flow-card ${userCredentialStatus === 'approved' ? 'flow-success' : userCredentialStatus === 'pending' ? 'flow-processing' : userCredentialStatus === 'revoked' ? 'flow-error' : 'flow-idle'}`}>
             <div className="zk-flow-badge-row">
-              <span className="zk-flow-num">PHASE 3</span>
-              <span className="pill pill-ok" style={{ fontSize: 10, padding: '2px 8px' }}>Preprod Ledger</span>
+              <span className="zk-flow-num">STEP 3</span>
+              <span className={`status-badge ${userCredentialStatus === 'approved' ? 'badge-success' : userCredentialStatus === 'pending' ? 'badge-processing' : userCredentialStatus === 'revoked' ? 'badge-error' : 'badge-idle'}`}>
+                {userCredentialStatus === 'approved' ? '✓ Success' : userCredentialStatus === 'pending' ? '⏳ Processing' : userCredentialStatus === 'revoked' ? '✕ Error' : '● Idle'}
+              </span>
             </div>
-            <h4>Authority Set Approval</h4>
-            <p>Authority verifies off-chain documentation and approves the commitment into <code className="mono">credentials</code> set.</p>
+            <h4>Authority Approval</h4>
+            <p>Compliance authority validates credentials off-chain and registers commitment into whitelist.</p>
           </div>
 
           <div className="zk-flow-arrow">➔</div>
 
-          <div className="zk-flow-card private">
+          <div className={`zk-flow-card ${state && Number(state.eligibilityCount) > 0 ? 'flow-success' : userCredentialStatus === 'approved' ? 'flow-processing' : 'flow-idle'}`}>
             <div className="zk-flow-badge-row">
-              <span className="zk-flow-num">PHASE 4</span>
-              <span className="pill pill-warn" style={{ fontSize: 10, padding: '2px 8px' }}>ZK-SNARK Proof</span>
+              <span className="zk-flow-num">STEP 4</span>
+              <span className={`status-badge ${state && Number(state.eligibilityCount) > 0 ? 'badge-success' : userCredentialStatus === 'approved' ? 'badge-processing' : 'badge-idle'}`}>
+                {state && Number(state.eligibilityCount) > 0 ? '✓ Success' : userCredentialStatus === 'approved' ? '⚡ Ready' : '● Idle'}
+              </span>
             </div>
-            <h4>Succinct Verification</h4>
-            <p>User executes <code className="mono">proveEligibility</code>. Midnight verifies circuit constraints without revealing identity.</p>
+            <h4>Generate Eligibility Proof</h4>
+            <p>Execute proveEligibility circuit constraint locally to create succinct ZK-SNARK proof.</p>
+          </div>
+
+          <div className="zk-flow-arrow">➔</div>
+
+          <div className={`zk-flow-card ${state && Number(state.eligibilityCount) > 0 ? 'flow-success' : 'flow-idle'}`}>
+            <div className="zk-flow-badge-row">
+              <span className="zk-flow-num">STEP 5</span>
+              <span className={`status-badge ${state && Number(state.eligibilityCount) > 0 ? 'badge-success' : 'badge-idle'}`}>
+                {state && Number(state.eligibilityCount) > 0 ? '✓ Success' : '● Idle'}
+              </span>
+            </div>
+            <h4>Verify Eligibility</h4>
+            <p>Midnight blockchain verifies ZK proof validity and increments verified compliance state.</p>
           </div>
         </div>
       </section>

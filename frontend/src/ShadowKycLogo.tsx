@@ -57,16 +57,17 @@ export const ShadowKycLogo: React.FC<ShadowKycLogoProps> = ({
           <stop offset="100%" stopColor="#3b82f6" />
         </linearGradient>
 
-        {/* Compliance Verified Checkmark Gradient */}
-        <linearGradient id="sk-comp-check" x1="18.5" y1="18" x2="29.5" y2="27" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#34d399" />
-          <stop offset="60%" stopColor="#10b981" />
+        {/* Central Diamond/Star Gradient */}
+        <linearGradient id="sk-comp-star" x1="17.5" y1="16.5" x2="30.5" y2="29.5" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#ffffff" />
+          <stop offset="35%" stopColor="#e9d5ff" />
+          <stop offset="70%" stopColor="#a855f7" />
           <stop offset="100%" stopColor="#06b6d4" />
         </linearGradient>
 
-        {/* Ambient Glow */}
+        {/* Ambient Subtle Glow */}
         <radialGradient id="sk-comp-glow" cx="24" cy="23" r="14" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#8b5cf6" stopOpacity="0.35" />
+          <stop offset="0%" stopColor="#8b5cf6" stopOpacity="0.25" />
           <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0" />
         </radialGradient>
       </defs>
@@ -104,19 +105,22 @@ export const ShadowKycLogo: React.FC<ShadowKycLogoProps> = ({
         cy="23"
         r="9.5"
         fill="#080c1a"
-        fillOpacity="0.9"
+        fillOpacity="0.94"
         stroke="url(#sk-comp-zk)"
-        strokeWidth="1.8"
+        strokeWidth="1.6"
       />
 
-      {/* KYC / AML Compliance Verified Checkmark */}
+      {/* Official Central Diamond / Star Mark */}
       <path
-        d="M19.2 23 L22.6 26.4 L29 19.5"
-        fill="none"
-        stroke="url(#sk-comp-check)"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
+        d="M24 16.2 Q24 23 30.8 23 Q24 23 24 29.8 Q24 23 17.2 23 Q24 23 24 16.2 Z"
+        fill="url(#sk-comp-star)"
+      />
+
+      {/* Central Radiant Diamond Facet Highlight */}
+      <polygon
+        points="24,20 27,23 24,26 21,23"
+        fill="#ffffff"
+        fillOpacity="0.92"
       />
 
       {/* Zero-Knowledge Cryptographic Nodes */}
